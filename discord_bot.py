@@ -1,3 +1,4 @@
+# discord_bot.py
 import os
 import discord
 from discord.ext import commands
@@ -21,7 +22,6 @@ async def data(ctx, platform: str, username: str):
         await ctx.send("Unsupported platform. Please use 'roblox'.")
         return
 
-    # Construct the URL to fetch the user data
     api_url = f"{API_BASE_URL}/get_user_data?username={username}"
     try:
         response = requests.get(api_url)
@@ -33,9 +33,17 @@ async def data(ctx, platform: str, username: str):
             return
 
         xp = result.get("xp", "Unknown")
+        offense_data = result.get("offenseData", {})  # New field
+        offense_text = "None"
+        if offense_data and isinstance(offense_data, dict):
+            offense_lines = []
+            for rule, count in offense_data.items():
+                offense_lines.append(f"Rule {rule}: {count} strikes")
+            offense_text = "\n".join(offense_lines)
+
         embed = discord.Embed(
             title=f"{username}'s Roblox Data",
-            description=f"Total in-game experience: **{xp}**",
+            description=f"XP: **{xp}**\nOffense Data:\n{offense_text}",
             color=discord.Color.blue()
         )
         await ctx.send(embed=embed)
