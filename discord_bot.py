@@ -10,15 +10,16 @@ bot = commands.Bot(command_prefix='-', intents=intents)
 
 API_BASE_URL = "https://xp-api.onrender.com"
 
-# Main group ID (if you still want a single "main" rank)
+# Main group ID (if you want a single "main" rank shown):
 MAIN_GROUP_ID = 7444608
 
-# Other kingdoms to show in the embed
+# Updated kingdoms dictionary:
+# - Removed Zain's (33781157) and Tyce's (5897268)
+# - Added Vinay's Kingdom (16132358)
 OTHER_KINGDOM_IDS = {
     11592051: "Artic's Kingdom",
     4561896:  "Kavra's Kingdom",
-    33781157: "Zain's Kingdom",
-    5897268:  "Tyce's Kingdom"
+    16132358: "Vinay's Kingdom"
 }
 
 def get_headshot(user_id):
@@ -98,7 +99,7 @@ async def data(ctx, platform: str, username: str):
             await ctx.send("User data does not include a userId.")
             return
 
-        # 2) Main group rank
+        # 2) Main group rank (optional)
         main_group_rank = get_group_rank(user_id, MAIN_GROUP_ID)
 
         # 3) Other kingdoms
