@@ -9,47 +9,47 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix='-', intents=intents)
 
-# Your API endpoint and Roblox group id
+# Replace with your live API endpoint
 API_BASE_URL = "https://xp-api.onrender.com"
+# Replace with your Roblox group ID
 GROUP_ID = 7444608
 
 def get_headshot(user_id):
     """
-    Returns the URL for the Roblox player's headshot thumbnail.
+    Returns a URL for the Roblox player's headshot thumbnail.
     """
     return f"https://www.roblox.com/headshot-thumbnail/image?userId={user_id}&width=420&height=420&format=png"
 
 def get_group_rank(user_id, group_id):
     """
-    Calls Roblox's group roles endpoint to get the player's role name (i.e. group rank)
-    in the specified group.
+    Queries Roblox's group roles endpoint to get the player's role name (group rank).
     """
     url = f"https://groups.roblox.com/v1/users/{user_id}/groups/roles"
     try:
         resp = requests.get(url)
         resp.raise_for_status()
         data = resp.json()
-        for group in data.get("data", []):
-            if group.get("group", {}).get("id") == group_id:
-                return group.get("role", {}).get("name")
+        for group_info in data.get("data", []):
+            if group_info.get("group", {}).get("id") == group_id:
+                return group_info.get("role", {}).get("name", "Unknown Role")
         return "Not in group"
     except Exception as e:
-        return "Unknown"
+        return f"Unknown (error: {e})"
 
 @bot.command()
 async def data(ctx, platform: str, username: str):
     """
     Usage: -data roblox <username>
-    Fetches the player's data from your API, then retrieves and displays:
+    Fetches the player's data from your API, then:
       - XP
-      - Their group rank (via Roblox group API)
-      - Their headshot image (set as the embed's thumbnail)
-      - Offense data if available
+      - Offense Data
+      - userId -> used to get headshot & group rank
     """
     if platform.lower() != "roblox":
         await ctx.send("Unsupported platform. Please use 'roblox'.")
         return
 
+    # Get data from your Flask API
     api_url = f"{API_BASE_URL}/get_user_data?username={username}"
     try:
         response = requests.get(api_url)
@@ -62,39 +62,45 @@ async def data(ctx, platform: str, username: str):
 
         xp = result.get("xp", "Unknown")
         offense_data = result.get("offenseData", {})
-        # Make sure the API returns the player's Roblox userId.
-        user_id = result.get("userId", None)
+        user_id = result.get("userId")  # The key field needed for headshot & rank
+
         if user_id is None:
             await ctx.send("User data does not include a userId.")
             return
 
-        # Retrieve additional Roblox info
+        # Fetch the player's group rank & headshot
         group_rank = get_group_rank(user_id, GROUP_ID)
         headshot_url = get_headshot(user_id)
 
-        # Build a string for offense data if available
+        # Build offense data text
         offense_text = "None"
         if offense_data and isinstance(offense_data, dict):
-            offense_lines = []
+            lines = []
             for rule, count in offense_data.items():
-                offense_lines.append(f"Rule {rule}: {count} strikes")
-            offense_text = "\n".join(offense_lines)
+                lines.append(f"Rule {rule}: {count} strikes")
+            offense_text = "\n".join(lines)
 
+        # Create the embed
         embed = discord.Embed(
             title=f"{username}'s Roblox Data",
-            description=f"**XP:** {xp}\n**Group Rank:** {group_rank}\n**Offense Data:**\n{offense_text}",
+            description=(
+                f"**XP:** {xp}\n"
+                f"**Group Rank:** {group_rank}\n"
+                f"**Offense Data:**\n{offense_text}"
+            ),
             color=discord.Color.blue()
         )
         embed.set_thumbnail(url=headshot_url)
+
         await ctx.send(embed=embed)
 
     except requests.exceptions.RequestException as e:
         await ctx.send(f"Error fetching data: {e}")
 
-# Retrieve the token from the environment variable
+# Get the bot token from environment variable
 TOKEN = os.environ.get("DISCORD_BOT_TOKEN")
 if not TOKEN:
-    raise ValueError("No Discord bot token provided! Please set the DISCORD_BOT_TOKEN environment variable.")
+    raise ValueError("No Discord bot token provided!")
 
 bot.run(TOKEN)
 
