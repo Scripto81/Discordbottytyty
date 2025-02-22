@@ -1,4 +1,3 @@
-# discord_bot.py
 import os
 import discord
 from discord.ext import commands
@@ -8,13 +7,9 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix='-', intents=intents)
 
-# Replace with your live API endpoint
-API_BASE_URL = "https://xp-api.onrender.com"
+API_BASE_URL = "https://xp-api.onrender.com"  # Replace with your actual API URL
 
-# Example main group ID
-MAIN_GROUP_ID = 7444608
-
-# Example other kingdoms
+MAIN_GROUP_ID = 7444608  # Example "main" group
 OTHER_KINGDOM_IDS = {
     11592051: "Artic's Kingdom",
     4561896:  "Kavra's Kingdom",
@@ -25,7 +20,6 @@ def get_headshot(user_id):
     return f"https://www.roblox.com/headshot-thumbnail/image?userId={user_id}&width=420&height=420&format=png"
 
 def get_group_rank(user_id, group_id):
-    """Fetch the user's role name in a single group."""
     url = f"https://groups.roblox.com/v1/users/{user_id}/groups/roles"
     try:
         resp = requests.get(url)
@@ -39,10 +33,6 @@ def get_group_rank(user_id, group_id):
         return f"Unknown (error: {e})"
 
 def get_all_group_ranks(user_id, group_ids):
-    """
-    Fetch the user's roles in multiple groups in one request.
-    Returns a dict: { group_id: "Role Name" }
-    """
     url = f"https://groups.roblox.com/v1/users/{user_id}/groups/roles"
     ranks = {gid: "Not in group" for gid in group_ids}
 
@@ -65,16 +55,15 @@ def get_all_group_ranks(user_id, group_ids):
 async def data(ctx, platform: str, username: str):
     """
     Usage: -data roblox <username>
-    Shows XP, offense data, userId, and group ranks if desired.
+    Fetches the player's data from your API and displays it.
     """
     if platform.lower() != "roblox":
         await ctx.send("Unsupported platform. Please use 'roblox'.")
         return
 
-    # 1) GET from /get_user_data
-    url = f"{API_BASE_URL}/get_user_data?username={username}"
+    api_url = f"{API_BASE_URL}/get_user_data?username={username}"
     try:
-        response = requests.get(url)
+        response = requests.get(api_url)
         response.raise_for_status()
         result = response.json()
 
@@ -90,10 +79,10 @@ async def data(ctx, platform: str, username: str):
             await ctx.send("User data does not include a userId.")
             return
 
-        # Get main group rank
+        # Main group rank
         main_group_rank = get_group_rank(user_id, MAIN_GROUP_ID)
 
-        # Get other kingdoms
+        # Other kingdoms
         other_ranks = get_all_group_ranks(user_id, OTHER_KINGDOM_IDS.keys())
         kingdoms_text = []
         for gid, kingdom_name in OTHER_KINGDOM_IDS.items():
@@ -101,7 +90,7 @@ async def data(ctx, platform: str, username: str):
             kingdoms_text.append(f"**{kingdom_name}:** {role}")
         kingdoms_info = "\n".join(kingdoms_text)
 
-        # Build offense text
+        # Offense data
         offense_text = "None"
         if offense_data and isinstance(offense_data, dict):
             lines = []
@@ -132,16 +121,27 @@ async def data(ctx, platform: str, username: str):
         await ctx.send(f"Error fetching data: {e}")
 
 @bot.command()
+@commands.has_any_role(
+    "Proxy",
+    "Head Proxy",
+    "Vortex",
+    "Noob",
+    "Alaska's Father",
+    "Alaska",
+    "The Queen",
+    "Bacon",
+    "Role Updater"
+)
 async def setxp(ctx, platform: str, username: str, new_xp: int):
     """
-    Usage: -setxp roblox <username> <newXP>
-    Looks up the user's userId, then calls /set_xp to change their XP.
+    Usage: -setxp roblox <username> <new_xp>
+    Updates the player's XP in your API, restricted to 'Proxy' role and above.
     """
     if platform.lower() != "roblox":
         await ctx.send("Unsupported platform. Please use 'roblox'.")
         return
 
-    # 1) Look up the user to get userId
+    # 1) Get user data to find userId
     get_url = f"{API_BASE_URL}/get_user_data?username={username}"
     try:
         get_resp = requests.get(get_url)
@@ -174,7 +174,14 @@ async def setxp(ctx, platform: str, username: str, new_xp: int):
     except requests.exceptions.RequestException as e:
         await ctx.send(f"Error updating XP: {e}")
 
-# Run your bot
+# Optional: custom error message if user lacks roles
+@bot.event
+async def on_command_error(ctx, error):
+    if isinstance(error, commands.MissingAnyRole):
+        await ctx.send("You do not have permission to use this command.")
+    else:
+        raise error
+
 TOKEN = os.environ.get("DISCORD_BOT_TOKEN")
 if not TOKEN:
     raise ValueError("No Discord bot token provided!")
