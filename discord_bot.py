@@ -8,14 +8,13 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix='-', intents=intents)
 
+# Replace with your live API endpoint
 API_BASE_URL = "https://xp-api.onrender.com"
 
-# Main group ID (if you want a single "main" rank shown):
+# Example main group ID
 MAIN_GROUP_ID = 7444608
 
-# Updated kingdoms dictionary:
-# - Removed Zain's (33781157) and Tyce's (5897268)
-# - Added Vinay's Kingdom (16132358)
+# Example other kingdoms
 OTHER_KINGDOM_IDS = {
     11592051: "Artic's Kingdom",
     4561896:  "Kavra's Kingdom",
@@ -23,14 +22,10 @@ OTHER_KINGDOM_IDS = {
 }
 
 def get_headshot(user_id):
-    """ Returns the Roblox headshot URL (420x420). """
     return f"https://www.roblox.com/headshot-thumbnail/image?userId={user_id}&width=420&height=420&format=png"
 
 def get_group_rank(user_id, group_id):
-    """
-    Retrieves the user's role name in a single group.
-    We'll use a separate approach for multiple groups, but keep this for the 'main' group.
-    """
+    """Fetch the user's role name in a single group."""
     url = f"https://groups.roblox.com/v1/users/{user_id}/groups/roles"
     try:
         resp = requests.get(url)
@@ -45,7 +40,8 @@ def get_group_rank(user_id, group_id):
 
 def get_all_group_ranks(user_id, group_ids):
     """
-    Fetches the user's group roles once, returning a dict { group_id: roleName }.
+    Fetch the user's roles in multiple groups in one request.
+    Returns a dict: { group_id: "Role Name" }
     """
     url = f"https://groups.roblox.com/v1/users/{user_id}/groups/roles"
     ranks = {gid: "Not in group" for gid in group_ids}
@@ -69,21 +65,16 @@ def get_all_group_ranks(user_id, group_ids):
 async def data(ctx, platform: str, username: str):
     """
     Usage: -data roblox <username>
-    Fetches:
-      - XP
-      - Offense Data
-      - userId -> for headshot & group ranks
-      - Main group rank
-      - Ranks in other kingdoms
+    Shows XP, offense data, userId, and group ranks if desired.
     """
     if platform.lower() != "roblox":
         await ctx.send("Unsupported platform. Please use 'roblox'.")
         return
 
-    # 1) Retrieve data from the Flask API
-    api_url = f"{API_BASE_URL}/get_user_data?username={username}"
+    # 1) GET from /get_user_data
+    url = f"{API_BASE_URL}/get_user_data?username={username}"
     try:
-        response = requests.get(api_url)
+        response = requests.get(url)
         response.raise_for_status()
         result = response.json()
 
@@ -93,16 +84,16 @@ async def data(ctx, platform: str, username: str):
 
         xp = result.get("xp", "Unknown")
         offense_data = result.get("offenseData", {})
-        user_id = result.get("userId")  # needed for group checks
+        user_id = result.get("userId")
 
         if user_id is None:
             await ctx.send("User data does not include a userId.")
             return
 
-        # 2) Main group rank (optional)
+        # Get main group rank
         main_group_rank = get_group_rank(user_id, MAIN_GROUP_ID)
 
-        # 3) Other kingdoms
+        # Get other kingdoms
         other_ranks = get_all_group_ranks(user_id, OTHER_KINGDOM_IDS.keys())
         kingdoms_text = []
         for gid, kingdom_name in OTHER_KINGDOM_IDS.items():
@@ -110,10 +101,7 @@ async def data(ctx, platform: str, username: str):
             kingdoms_text.append(f"**{kingdom_name}:** {role}")
         kingdoms_info = "\n".join(kingdoms_text)
 
-        # 4) Headshot
-        headshot_url = get_headshot(user_id)
-
-        # 5) Offense data text
+        # Build offense text
         offense_text = "None"
         if offense_data and isinstance(offense_data, dict):
             lines = []
@@ -121,7 +109,10 @@ async def data(ctx, platform: str, username: str):
                 lines.append(f"Rule {rule}: {count} strikes")
             offense_text = "\n".join(lines)
 
-        # 6) Construct embed
+        # Headshot
+        headshot_url = get_headshot(user_id)
+
+        # Construct embed
         description = (
             f"**XP:** {xp}\n"
             f"**Main Group Rank:** {main_group_rank}\n"
@@ -139,6 +130,49 @@ async def data(ctx, platform: str, username: str):
 
     except requests.exceptions.RequestException as e:
         await ctx.send(f"Error fetching data: {e}")
+
+@bot.command()
+async def setxp(ctx, platform: str, username: str, new_xp: int):
+    """
+    Usage: -setxp roblox <username> <newXP>
+    Looks up the user's userId, then calls /set_xp to change their XP.
+    """
+    if platform.lower() != "roblox":
+        await ctx.send("Unsupported platform. Please use 'roblox'.")
+        return
+
+    # 1) Look up the user to get userId
+    get_url = f"{API_BASE_URL}/get_user_data?username={username}"
+    try:
+        get_resp = requests.get(get_url)
+        get_resp.raise_for_status()
+        user_data = get_resp.json()
+
+        if "error" in user_data:
+            await ctx.send(f"Error: {user_data['error']}")
+            return
+
+        user_id = user_data.get("userId")
+        if user_id is None:
+            await ctx.send("User data does not include a userId.")
+            return
+
+        # 2) Call /set_xp with userId and new_xp
+        post_url = f"{API_BASE_URL}/set_xp"
+        payload = {"userId": user_id, "xp": new_xp}
+        post_resp = requests.post(post_url, json=payload)
+        post_resp.raise_for_status()
+        result = post_resp.json()
+
+        if "error" in result:
+            await ctx.send(f"Error: {result['error']}")
+            return
+
+        updated_xp = result.get("newXp", new_xp)
+        await ctx.send(f"Successfully set {username}'s XP to {updated_xp}.")
+
+    except requests.exceptions.RequestException as e:
+        await ctx.send(f"Error updating XP: {e}")
 
 # Run your bot
 TOKEN = os.environ.get("DISCORD_BOT_TOKEN")
