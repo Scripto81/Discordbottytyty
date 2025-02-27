@@ -2,6 +2,7 @@ import os
 import discord
 from discord.ext import commands
 import requests
+import datetime
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -18,13 +19,24 @@ OTHER_KINGDOM_IDS = {
 }
 
 # Placeholder badge ID for determining when a user first joined game 84416791344548.
-# Replace with the actual badge id that is awarded upon first join.
+# Replace with the actual badge id awarded upon first join.
 GAME_BADGE_ID = 123456789  
+
+def format_timestamp(ts):
+    """Convert an ISO timestamp into a human-friendly format."""
+    try:
+        # Remove trailing 'Z' if present
+        if ts.endswith("Z"):
+            ts = ts[:-1]
+        dt = datetime.datetime.fromisoformat(ts)
+        return dt.strftime("%b %d, %Y %I:%M %p")
+    except Exception:
+        return ts
 
 def get_headshot(user_id):
     """
     Uses Roblox's Thumbnails API to retrieve a headshot.
-    Fallback to the old URL if anything fails.
+    Falls back to the old URL if needed.
     """
     url = f"https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds={user_id}&size=420x420&format=Png&isCircular=false"
     try:
@@ -35,7 +47,7 @@ def get_headshot(user_id):
             return data["data"][0].get("imageUrl", f"https://www.roblox.com/headshot-thumbnail/image?userId={user_id}&width=420&height=420&format=png")
         else:
             return f"https://www.roblox.com/headshot-thumbnail/image?userId={user_id}&width=420&height=420&format=png"
-    except Exception as e:
+    except Exception:
         return f"https://www.roblox.com/headshot-thumbnail/image?userId={user_id}&width=420&height=420&format=png"
 
 def get_group_rank(user_id, group_id):
@@ -78,13 +90,12 @@ def get_roblox_profile(user_id):
         resp = requests.get(url)
         resp.raise_for_status()
         return resp.json()
-    except Exception as e:
+    except Exception:
         return None
 
 def get_last_online(user_id):
     """
     Retrieves the last online timestamp for the user.
-    The API returns the date when the user was last seen.
     """
     url = "https://presence.roblox.com/v1/presence/last-online"
     payload = {"userIds": [user_id]}
@@ -93,11 +104,44 @@ def get_last_online(user_id):
         resp.raise_for_status()
         data = resp.json()
         if "data" in data and len(data["data"]) > 0:
-            # Returns a timestamp string (ISO format) if available.
             return data["data"][0].get("lastOnline", "N/A")
         return "N/A"
-    except Exception as e:
+    except Exception:
         return "N/A"
+
+def get_presence_status(user_id):
+    """
+    Retrieves the current presence status of the user.
+    Returns:
+      - "Online" or "In Game" or "In Studio" if active.
+      - If offline, returns the formatted last online time.
+    """
+    url = "https://presence.roblox.com/v1/presence/users"
+    payload = {"userIds": [user_id]}
+    try:
+        resp = requests.post(url, json=payload)
+        resp.raise_for_status()
+        data = resp.json()
+        if "data" in data and len(data["data"]) > 0:
+            status_num = data["data"][0].get("userPresenceType", 0)
+            if status_num == 0:
+                # Offline: show last online
+                lo = get_last_online(user_id)
+                if lo != "N/A":
+                    return f"Offline (Last Online: {format_timestamp(lo)})"
+                else:
+                    return "Offline"
+            elif status_num == 1:
+                return "Online"
+            elif status_num == 2:
+                return "In Game"
+            elif status_num == 3:
+                return "In Studio"
+            else:
+                return "Unknown"
+        return "Unknown"
+    except Exception:
+        return "Unknown"
 
 def get_game_join_date(user_id, badge_id=GAME_BADGE_ID):
     """
@@ -113,21 +157,37 @@ def get_game_join_date(user_id, badge_id=GAME_BADGE_ID):
             return data["data"][0].get("awardedDate", "N/A")
         else:
             return "Not Awarded"
-    except Exception as e:
+    except Exception:
         return "Error"
+
+def get_friends_count(user_id):
+    """
+    Retrieves the friend count for the user.
+    """
+    url = f"https://friends.roblox.com/v1/users/{user_id}/friends/count"
+    try:
+        resp = requests.get(url)
+        resp.raise_for_status()
+        data = resp.json()
+        return data.get("count", "N/A")
+    except Exception:
+        return "N/A"
 
 @bot.command()
 async def data(ctx, platform: str, username: str):
     """
     Usage: -data roblox <username>
-    Fetches the player's data from your API and then enriches it with additional
-    details from Roblox (account creation, last online, game join date, etc.).
+    Fetches the player's data from your API and enriches it with additional details from Roblox:
+    - Account Creation Date
+    - Enhanced Presence Info (online/offline)
+    - Game Join Date (via badge award)
+    - Display Name and Friend Count
     """
     if platform.lower() != "roblox":
         await ctx.send("Unsupported platform. Please use 'roblox'.")
         return
 
-    # 1. Get the player's stored data (XP, offense, etc.) from your API.
+    # 1. Get stored data from your API.
     api_url = f"{API_BASE_URL}/get_user_data?username={username}"
     try:
         response = requests.get(api_url)
@@ -151,48 +211,43 @@ async def data(ctx, platform: str, username: str):
 
     # 2. Retrieve extra details from Roblox's official APIs.
     profile = get_roblox_profile(user_id)
-    account_created = profile.get("created") if profile and "created" in profile else "N/A"
-    
-    last_online = get_last_online(user_id)
-    game_join_date = get_game_join_date(user_id)  # via badge award date
+    display_name = profile.get("displayName") if profile and "displayName" in profile else username
+    account_created = format_timestamp(profile.get("created")) if profile and "created" in profile else "N/A"
+    presence_status = get_presence_status(user_id)
+    game_join_date_raw = get_game_join_date(user_id)
+    game_join_date = format_timestamp(game_join_date_raw) if game_join_date_raw not in ["Not Awarded", "Error", "N/A"] else game_join_date_raw
+    friends_count = get_friends_count(user_id)
 
-    # 3. Get group ranks (main group and others).
+    # 3. Get group ranks.
     main_group_rank = get_group_rank(user_id, MAIN_GROUP_ID)
     other_ranks = get_all_group_ranks(user_id, OTHER_KINGDOM_IDS.keys())
-    kingdoms_text = []
-    for gid, kingdom_name in OTHER_KINGDOM_IDS.items():
-        role = other_ranks[gid]
-        kingdoms_text.append(f"**{kingdom_name}:** {role}")
-    kingdoms_info = "\n".join(kingdoms_text)
+    kingdoms_text = "\n".join([f"**{OTHER_KINGDOM_IDS[gid]}:** {other_ranks[gid]}" for gid in OTHER_KINGDOM_IDS])
 
     # 4. Format offense data.
     if offense_data and isinstance(offense_data, dict):
-        offense_lines = [f"Rule {rule}: {count} strikes" for rule, count in offense_data.items()]
-        offense_text = "\n".join(offense_lines)
+        offense_text = "\n".join([f"Rule {rule}: {count} strikes" for rule, count in offense_data.items()])
     else:
         offense_text = "None"
 
     # 5. Retrieve headshot image.
     headshot_url = get_headshot(user_id)
 
-    # 6. Construct the embed with all the details.
-    description = (
-        f"**XP:** {xp}\n"
-        f"**Last Updated:** {last_updated}\n"
-        f"**Account Created:** {account_created}\n"
-        f"**Last Online:** {last_online}\n"
-        f"**Game Join Date:** {game_join_date}\n"
-        f"**Main Group Rank:** {main_group_rank}\n"
-        f"**Offense Data:**\n{offense_text}\n\n"
-        f"**Other Kingdom Ranks:**\n{kingdoms_info}"
-    )
-
+    # 6. Build the embed with enhanced details.
     embed = discord.Embed(
         title=f"{username}'s Roblox Data",
-        description=description,
         color=discord.Color.blue()
     )
     embed.set_thumbnail(url=headshot_url)
+    embed.add_field(name="Display Name", value=display_name, inline=True)
+    embed.add_field(name="XP", value=xp, inline=True)
+    embed.add_field(name="Last Updated", value=format_timestamp(last_updated) if last_updated != "Unknown" else last_updated, inline=True)
+    embed.add_field(name="Account Created", value=account_created, inline=True)
+    embed.add_field(name="Presence", value=presence_status, inline=True)
+    embed.add_field(name="Game Join Date", value=game_join_date, inline=True)
+    embed.add_field(name="Friends", value=friends_count, inline=True)
+    embed.add_field(name="Main Group Rank", value=main_group_rank, inline=True)
+    embed.add_field(name="Offense Data", value=offense_text, inline=False)
+    embed.add_field(name="Other Kingdom Ranks", value=kingdoms_text, inline=False)
     embed.add_field(name="Profile", value=f"[View Roblox Profile](https://www.roblox.com/users/{user_id}/profile)", inline=False)
 
     await ctx.send(embed=embed)
