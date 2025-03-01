@@ -113,8 +113,7 @@ def get_presence_status(user_id):
     """
     Retrieves the current presence status of the user.
     Returns:
-      - "Online" or "In Game" or "In Studio" if active.
-      - If offline, returns the formatted last online time.
+      - "Online", "In Game", "In Studio", or if offline, the formatted last online time.
     """
     url = "https://presence.roblox.com/v1/presence/users"
     payload = {"userIds": [user_id]}
@@ -125,7 +124,6 @@ def get_presence_status(user_id):
         if "data" in data and len(data["data"]) > 0:
             status_num = data["data"][0].get("userPresenceType", 0)
             if status_num == 0:
-                # Offline: show last online
                 lo = get_last_online(user_id)
                 if lo != "N/A":
                     return f"Offline (Last Online: {format_timestamp(lo)})"
@@ -178,10 +176,11 @@ async def data(ctx, platform: str, username: str):
     """
     Usage: -data roblox <username>
     Fetches the player's data from your API and enriches it with additional details from Roblox:
-    - Account Creation Date
-    - Enhanced Presence Info (online/offline)
-    - Game Join Date (via badge award)
-    - Display Name and Friend Count
+      - Account Creation Date
+      - Presence (online/offline/in game)
+      - Game Join Date (via badge award)
+      - Display Name and Friend Count
+      - Offense Data (with strike counts and jail data, if applicable)
     """
     if platform.lower() != "roblox":
         await ctx.send("Unsupported platform. Please use 'roblox'.")
@@ -224,8 +223,20 @@ async def data(ctx, platform: str, username: str):
     kingdoms_text = "\n".join([f"**{OTHER_KINGDOM_IDS[gid]}:** {other_ranks[gid]}" for gid in OTHER_KINGDOM_IDS])
 
     # 4. Format offense data.
+    # We iterate over the offense data and skip the special "JailData" key,
+    # but also optionally display it.
     if offense_data and isinstance(offense_data, dict):
-        offense_text = "\n".join([f"Rule {rule}: {count} strikes" for rule, count in offense_data.items()])
+        offense_lines = []
+        jail_info = None
+        for key, value in offense_data.items():
+            if key == "JailData":
+                if isinstance(value, dict):
+                    jail_info = f"Jail Data: EndTime {value.get('endTime', 'N/A')}, Rule {value.get('strikeNumber', 'N/A')}"
+            else:
+                offense_lines.append(f"Rule {key}: {value} strikes")
+        offense_text = "\n".join(offense_lines) if offense_lines else "None"
+        if jail_info:
+            offense_text += "\n" + jail_info
     else:
         offense_text = "None"
 
@@ -240,7 +251,7 @@ async def data(ctx, platform: str, username: str):
     embed.set_thumbnail(url=headshot_url)
     embed.add_field(name="Display Name", value=display_name, inline=True)
     embed.add_field(name="XP", value=xp, inline=True)
-    embed.add_field(name="Last Updated", value=format_timestamp(last_updated) if last_updated != "Unknown" else last_updated, inline=True)
+    embed.add_field(name="Last Updated", value=(format_timestamp(last_updated) if last_updated != "Unknown" else last_updated), inline=True)
     embed.add_field(name="Account Created", value=account_created, inline=True)
     embed.add_field(name="Presence", value=presence_status, inline=True)
     embed.add_field(name="Game Join Date", value=game_join_date, inline=True)
