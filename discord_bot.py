@@ -5,8 +5,11 @@ import requests
 import datetime
 import uuid  # For generating unique verification codes
 
+# Enable members intent
 intents = discord.Intents.default()
 intents.message_content = True
+intents.members = True  # This is required for fetching member profiles
+
 bot = commands.Bot(command_prefix='-', intents=intents)
 
 API_BASE_URL = "https://xp-api.onrender.com"  # Your internal API URL
@@ -188,8 +191,6 @@ def get_roblox_user_id(username):
     except Exception as e:
         print("Error in get_roblox_user_id:", e)
         return None
-
-# ---------------------- Commands ----------------------
 
 @bot.command()
 async def data(ctx, platform: str, username: str):
