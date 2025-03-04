@@ -26,7 +26,6 @@ GAME_BADGE_ID = 123456789
 def format_timestamp(ts):
     """Convert an ISO timestamp into a human-friendly format."""
     try:
-        # Remove trailing 'Z' if present
         if ts.endswith("Z"):
             ts = ts[:-1]
         dt = datetime.datetime.fromisoformat(ts)
@@ -172,6 +171,24 @@ def get_friends_count(user_id):
     except Exception:
         return "N/A"
 
+def get_roblox_user_id(username):
+    """
+    Retrieves a Roblox user ID from a given username using the current endpoint.
+    """
+    url = "https://users.roblox.com/v1/usernames/users"
+    payload = {"usernames": [username], "excludeBannedUsers": False}
+    headers = {"Content-Type": "application/json"}
+    try:
+        resp = requests.post(url, headers=headers, json=payload)
+        resp.raise_for_status()
+        data = resp.json()
+        if data.get("data") and len(data["data"]) > 0:
+            return data["data"][0].get("id")
+        return None
+    except Exception as e:
+        print("Error in get_roblox_user_id:", e)
+        return None
+
 @bot.command()
 async def data(ctx, platform: str, username: str):
     """
@@ -224,8 +241,6 @@ async def data(ctx, platform: str, username: str):
     kingdoms_text = "\n".join([f"**{OTHER_KINGDOM_IDS[gid]}:** {other_ranks[gid]}" for gid in OTHER_KINGDOM_IDS])
 
     # 4. Format offense data.
-    # We iterate over the offense data and skip the special "JailData" key,
-    # but also optionally display it.
     if offense_data and isinstance(offense_data, dict):
         offense_lines = []
         jail_info = None
@@ -244,7 +259,7 @@ async def data(ctx, platform: str, username: str):
     # 5. Retrieve headshot image.
     headshot_url = get_headshot(user_id)
 
-    # 6. Build the embed with enhanced details.
+    # 6. Build the embed.
     embed = discord.Embed(
         title=f"{username}'s Roblox Data",
         color=discord.Color.blue()
@@ -285,7 +300,6 @@ async def setxp(ctx, platform: str, username: str, new_xp: int):
         await ctx.send("Unsupported platform. Please use 'roblox'.")
         return
 
-    # Get user data to find userId
     get_url = f"{API_BASE_URL}/get_user_data?username={username}"
     try:
         get_resp = requests.get(get_url)
@@ -299,7 +313,6 @@ async def setxp(ctx, platform: str, username: str, new_xp: int):
             await ctx.send("User data does not include a userId.")
             return
 
-        # Update XP via the API
         post_url = f"{API_BASE_URL}/set_xp"
         payload = {"userId": user_id, "xp": new_xp}
         post_resp = requests.post(post_url, json=payload)
@@ -373,8 +386,7 @@ async def register(ctx, platform: str, username: str, roblox_user_id: int, xp: i
     except requests.exceptions.RequestException as e:
         await ctx.send(f"Error registering user: {e}")
 
-# Verification commands
-
+# Verification Commands
 pending_verifications = {}  # Key: roblox_username.lower(), Value: { "discord_id": int, "code": str, "timestamp": str }
 verified_accounts = {}      # Key: roblox_username.lower(), Value: { "discord_id": int, "roblox_user_id": int, "timestamp": str }
 
@@ -385,7 +397,6 @@ async def verify(ctx, roblox_username: str):
     Generates a unique code and instructs the user to add it to their Roblox profile description.
     """
     key = roblox_username.lower()
-    # Generate a simple verification code (you can customize this as needed)
     code = str(uuid.uuid4()).split("-")[0]  # e.g. a short hex string
     pending_verifications[key] = {
         "discord_id": ctx.author.id,
@@ -416,20 +427,12 @@ async def confirm(ctx, roblox_username: str):
         await ctx.send("You do not have permission to confirm this verification. It was initiated by another user.")
         return
 
-    # Get the Roblox user ID via legacy endpoint (or update this as needed)
-    try:
-        response = requests.get(f"https://api.roblox.com/users/get-by-username?username={roblox_username}")
-        response.raise_for_status()
-        data = response.json()
-        if data.get("Id") is None or data.get("Id") == 0:
-            await ctx.send("Could not find that Roblox username.")
-            return
-        roblox_user_id = data["Id"]
-    except Exception as e:
-        await ctx.send(f"Error fetching Roblox user: {e}")
+    # Use the updated function to get the user id
+    roblox_user_id = get_roblox_user_id(roblox_username)
+    if not roblox_user_id:
+        await ctx.send("Could not find that Roblox username.")
         return
 
-    # Fetch the user's profile to check the description
     profile = get_roblox_profile(roblox_user_id)
     if not profile:
         await ctx.send("Error fetching Roblox profile.")
@@ -439,23 +442,18 @@ async def confirm(ctx, roblox_username: str):
     verification_code = pending["code"]
 
     if verification_code in description:
-        # Verification successful; store the verified account
         verified_accounts[key] = {
             "discord_id": ctx.author.id,
             "roblox_user_id": roblox_user_id,
             "timestamp": datetime.datetime.utcnow().isoformat()
         }
-        # Remove from pending verifications
         del pending_verifications[key]
-        
-        # Attempt to update the member's nickname in the guild
         if ctx.guild:
             try:
                 new_nickname = f"{roblox_username} (@{ctx.author.name})"
                 await ctx.author.edit(nick=new_nickname)
             except Exception as e:
                 await ctx.send("Verification successful, but I was unable to update your nickname. Please check my permissions.")
-        
         await ctx.send(f"Successfully verified Roblox account **{roblox_username}** with Discord account {ctx.author.mention}.")
     else:
         await ctx.send(
