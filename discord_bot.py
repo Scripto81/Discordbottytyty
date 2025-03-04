@@ -3,6 +3,7 @@ import discord
 from discord.ext import commands
 import requests
 import datetime
+import uuid  # for generating unique verification codes
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -371,6 +372,109 @@ async def register(ctx, platform: str, username: str, roblox_user_id: int, xp: i
             await ctx.send(f"Error: {result.get('error', 'Unknown error')}")
     except requests.exceptions.RequestException as e:
         await ctx.send(f"Error registering user: {e}")
+
+# Verification commands
+
+pending_verifications = {}  # Key: roblox_username.lower(), Value: { "discord_id": int, "code": str, "timestamp": str }
+verified_accounts = {}      # Key: roblox_username.lower(), Value: { "discord_id": int, "roblox_user_id": int, "timestamp": str }
+
+@bot.command()
+async def verify(ctx, roblox_username: str):
+    """
+    Usage: -verify <roblox_username>
+    Generates a unique code and instructs the user to add it to their Roblox profile description.
+    """
+    key = roblox_username.lower()
+    # Generate a simple verification code (you can customize this as needed)
+    code = str(uuid.uuid4()).split("-")[0]  # e.g. a short hex string
+    pending_verifications[key] = {
+        "discord_id": ctx.author.id,
+        "code": code,
+        "timestamp": datetime.datetime.utcnow().isoformat()
+    }
+    await ctx.send(
+        f"{ctx.author.mention}, to verify your Roblox account **{roblox_username}**, please add the following code to your Roblox profile description:\n\n"
+        f"`{code}`\n\n"
+        "After updating your description, run `-confirm " + roblox_username + "` to complete verification."
+    )
+
+@bot.command()
+async def confirm(ctx, roblox_username: str):
+    """
+    Usage: -confirm <roblox_username>
+    Checks the Roblox profile description for the verification code and, if found,
+    marks the Roblox account as verified with the Discord user.
+    Also updates the member's nickname to display as: RobloxUsername (@DiscordName)
+    """
+    key = roblox_username.lower()
+    pending = pending_verifications.get(key)
+    if not pending:
+        await ctx.send("No pending verification found for that username. Please run `-verify <roblox_username>` first.")
+        return
+
+    if pending["discord_id"] != ctx.author.id:
+        await ctx.send("You do not have permission to confirm this verification. It was initiated by another user.")
+        return
+
+    # Get the Roblox user ID via legacy endpoint (or update this as needed)
+    try:
+        response = requests.get(f"https://api.roblox.com/users/get-by-username?username={roblox_username}")
+        response.raise_for_status()
+        data = response.json()
+        if data.get("Id") is None or data.get("Id") == 0:
+            await ctx.send("Could not find that Roblox username.")
+            return
+        roblox_user_id = data["Id"]
+    except Exception as e:
+        await ctx.send(f"Error fetching Roblox user: {e}")
+        return
+
+    # Fetch the user's profile to check the description
+    profile = get_roblox_profile(roblox_user_id)
+    if not profile:
+        await ctx.send("Error fetching Roblox profile.")
+        return
+
+    description = profile.get("description", "")
+    verification_code = pending["code"]
+
+    if verification_code in description:
+        # Verification successful; store the verified account
+        verified_accounts[key] = {
+            "discord_id": ctx.author.id,
+            "roblox_user_id": roblox_user_id,
+            "timestamp": datetime.datetime.utcnow().isoformat()
+        }
+        # Remove from pending verifications
+        del pending_verifications[key]
+        
+        # Attempt to update the member's nickname in the guild
+        if ctx.guild:
+            try:
+                new_nickname = f"{roblox_username} (@{ctx.author.name})"
+                await ctx.author.edit(nick=new_nickname)
+            except Exception as e:
+                await ctx.send("Verification successful, but I was unable to update your nickname. Please check my permissions.")
+        
+        await ctx.send(f"Successfully verified Roblox account **{roblox_username}** with Discord account {ctx.author.mention}.")
+    else:
+        await ctx.send(
+            "Verification code not found in your Roblox profile description. Please ensure you have updated your description to include:\n"
+            f"`{verification_code}`\nThen try running the command again."
+        )
+
+@bot.command()
+async def verified(ctx, roblox_username: str):
+    """
+    Usage: -verified <roblox_username>
+    Displays the verification status of the given Roblox username.
+    """
+    key = roblox_username.lower()
+    if key in verified_accounts:
+        info = verified_accounts[key]
+        await ctx.send(f"Roblox account **{roblox_username}** is verified with Discord ID {info['discord_id']} (verified at {info['timestamp']}).")
+    else:
+        await ctx.send(f"No verification found for **{roblox_username}**.")
 
 @bot.event
 async def on_command_error(ctx, error):
