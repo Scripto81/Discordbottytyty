@@ -3,7 +3,7 @@ import discord
 from discord.ext import commands
 import requests
 import datetime
-import uuid  # for generating unique verification codes
+import uuid  # For generating unique verification codes
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -21,7 +21,7 @@ OTHER_KINGDOM_IDS = {
 
 # Placeholder badge ID for determining when a user first joined game 84416791344548.
 # Replace with the actual badge id awarded upon first join.
-GAME_BADGE_ID = 123456789  
+GAME_BADGE_ID = 123456789
 
 def format_timestamp(ts):
     """Convert an ISO timestamp into a human-friendly format."""
@@ -189,6 +189,8 @@ def get_roblox_user_id(username):
         print("Error in get_roblox_user_id:", e)
         return None
 
+# ---------------------- Commands ----------------------
+
 @bot.command()
 async def data(ctx, platform: str, username: str):
     """
@@ -204,7 +206,6 @@ async def data(ctx, platform: str, username: str):
         await ctx.send("Unsupported platform. Please use 'roblox'.")
         return
 
-    # 1. Get stored data from your API.
     api_url = f"{API_BASE_URL}/get_user_data?username={username}"
     try:
         response = requests.get(api_url)
@@ -226,7 +227,6 @@ async def data(ctx, platform: str, username: str):
         await ctx.send("User data does not include a userId.")
         return
 
-    # 2. Retrieve extra details from Roblox's official APIs.
     profile = get_roblox_profile(user_id)
     display_name = profile.get("displayName") if profile and "displayName" in profile else username
     account_created = format_timestamp(profile.get("created")) if profile and "created" in profile else "N/A"
@@ -235,12 +235,10 @@ async def data(ctx, platform: str, username: str):
     game_join_date = format_timestamp(game_join_date_raw) if game_join_date_raw not in ["Not Awarded", "Error", "N/A"] else game_join_date_raw
     friends_count = get_friends_count(user_id)
 
-    # 3. Get group ranks.
     main_group_rank = get_group_rank(user_id, MAIN_GROUP_ID)
     other_ranks = get_all_group_ranks(user_id, OTHER_KINGDOM_IDS.keys())
     kingdoms_text = "\n".join([f"**{OTHER_KINGDOM_IDS[gid]}:** {other_ranks[gid]}" for gid in OTHER_KINGDOM_IDS])
 
-    # 4. Format offense data.
     if offense_data and isinstance(offense_data, dict):
         offense_lines = []
         jail_info = None
@@ -256,10 +254,8 @@ async def data(ctx, platform: str, username: str):
     else:
         offense_text = "None"
 
-    # 5. Retrieve headshot image.
     headshot_url = get_headshot(user_id)
 
-    # 6. Build the embed.
     embed = discord.Embed(
         title=f"{username}'s Roblox Data",
         color=discord.Color.blue()
@@ -386,7 +382,8 @@ async def register(ctx, platform: str, username: str, roblox_user_id: int, xp: i
     except requests.exceptions.RequestException as e:
         await ctx.send(f"Error registering user: {e}")
 
-# Verification Commands
+# ---------------- Verification Commands ----------------
+
 pending_verifications = {}  # Key: roblox_username.lower(), Value: { "discord_id": int, "code": str, "timestamp": str }
 verified_accounts = {}      # Key: roblox_username.lower(), Value: { "discord_id": int, "roblox_user_id": int, "timestamp": str }
 
@@ -397,7 +394,7 @@ async def verify(ctx, roblox_username: str):
     Generates a unique code and instructs the user to add it to their Roblox profile description.
     """
     key = roblox_username.lower()
-    code = str(uuid.uuid4()).split("-")[0]  # e.g. a short hex string
+    code = str(uuid.uuid4()).split("-")[0]
     pending_verifications[key] = {
         "discord_id": ctx.author.id,
         "code": code,
@@ -414,8 +411,8 @@ async def confirm(ctx, roblox_username: str):
     """
     Usage: -confirm <roblox_username>
     Checks the Roblox profile description for the verification code and, if found,
-    marks the Roblox account as verified with the Discord user.
-    Also updates the member's nickname to display as: RobloxUsername (@DiscordName)
+    verifies the Roblox account and updates the member's nickname to display as:
+    RobloxDisplayName (@RobloxUsername)
     """
     key = roblox_username.lower()
     pending = pending_verifications.get(key)
@@ -427,7 +424,6 @@ async def confirm(ctx, roblox_username: str):
         await ctx.send("You do not have permission to confirm this verification. It was initiated by another user.")
         return
 
-    # Use the updated function to get the user id
     roblox_user_id = get_roblox_user_id(roblox_username)
     if not roblox_user_id:
         await ctx.send("Could not find that Roblox username.")
@@ -448,13 +444,21 @@ async def confirm(ctx, roblox_username: str):
             "timestamp": datetime.datetime.utcnow().isoformat()
         }
         del pending_verifications[key]
+
         if ctx.guild:
             try:
-                new_nickname = f"{roblox_username} (@{ctx.author.name})"
-                await ctx.author.edit(nick=new_nickname)
+                roblox_display_name = profile.get("displayName", roblox_username)
+                new_nickname = f"{roblox_display_name} (@{roblox_username})"
+                member = ctx.guild.get_member(ctx.author.id)
+                if member:
+                    await member.edit(nick=new_nickname)
+                    await ctx.send(f"Successfully verified Roblox account **{roblox_username}** and updated your nickname to `{new_nickname}`.")
+                else:
+                    await ctx.send("Verification successful, but I couldn't fetch your Discord member profile to update your nickname.")
             except Exception as e:
                 await ctx.send("Verification successful, but I was unable to update your nickname. Please check my permissions.")
-        await ctx.send(f"Successfully verified Roblox account **{roblox_username}** with Discord account {ctx.author.mention}.")
+        else:
+            await ctx.send(f"Successfully verified Roblox account **{roblox_username}**, but nickname updates are only possible in servers.")
     else:
         await ctx.send(
             "Verification code not found in your Roblox profile description. Please ensure you have updated your description to include:\n"
