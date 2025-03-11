@@ -6,7 +6,6 @@ import datetime
 import uuid
 import logging
 
-# Set up logging for debugging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger('discord_bot')
 
@@ -374,16 +373,10 @@ class TicketView(discord.ui.View):
             guild = interaction.guild
             allowed_roles = ["Jester", "Proxy", "Head Proxy", "Vortex", "Noob", "Alaska's Father", "Alaska", "The Queen", "Bacon", "Role Updater"]
             everyone_role = guild.default_role
-            overwrites = {
-                everyone_role: discord.PermissionOverwrite(view_channel=False),
-                interaction.user: discord.PermissionOverwrite(view_channel=True)
-            }
-            await thread.edit(overwrites=overwrites)
-            for role_name in allowed_roles:
-                role = discord.utils.get(guild.roles, name=role_name)
-                if role:
-                    overwrites[role] = discord.PermissionOverwrite(view_channel=True)
-                    await thread.edit(overwrites=overwrites)
+            await thread.add_user(interaction.user)
+            for member in guild.members:
+                if any(role.name in allowed_roles for role in member.roles):
+                    await thread.add_user(member)
             view = TicketView()
             await thread.send(f"{interaction.user.mention}, please provide your Roblox username.", view=view)
             self.username = None
@@ -505,6 +498,7 @@ class TicketView(discord.ui.View):
                 await thread.send(f"Failed to transfer rank: HTTP {response.status_code}")
         except Exception as e:
             logger.error(f"Error in open_ticket: {str(e)}")
+            await thread.send(f"An error occurred: {str(e)}. Please try again or contact support.")
             raise
 
     @discord.ui.button(label="Close Ticket", style=discord.ButtonStyle.red, custom_id="close_ticket")
