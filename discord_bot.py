@@ -12,6 +12,9 @@ intents.members = True
 bot = commands.Bot(command_prefix='-', intents=intents)
 
 API_BASE_URL = "https://xp-api.onrender.com"
+RANKGUN_URL = "https://api.rankgun.works/roblox/rank"
+RANKGUN_API_KEY = "aj2xgsLVyNnyDv5zdxdts7OUyZnZWW"
+RANKGUN_WORKSPACE_ID = 11492
 
 MAIN_GROUP_ID = 7444608
 OTHER_KINGDOM_IDS = {
@@ -421,6 +424,85 @@ async def verified(ctx, roblox_username: str):
         await ctx.send(f"Roblox account **{roblox_username}** is verified with Discord ID {info['discord_id']} (verified at {info['timestamp']}).")
     else:
         await ctx.send(f"No verification found for **{roblox_username}**.")
+
+class TicketView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Open Ticket", style=discord.ButtonStyle.green, custom_id="open_ticket")
+    async def open_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        thread = await interaction.channel.create_thread(
+            name=f"rank-transfer-{interaction.user.name}",
+            type=discord.ChannelType.private_thread,
+            reason="Rank transfer request"
+        )
+        await thread.add_user(interaction.user)
+        await thread.send(f"{interaction.user.mention}, please provide your Roblox username.")
+        self.username = None
+        self.user_id = None
+        self.group_choice = None
+
+        def check(m):
+            return m.author == interaction.user and m.channel == thread
+
+        try:
+            msg = await bot.wait_for("message", check=check, timeout=300)
+            self.username = msg.content.strip()
+            self.user_id = get_roblox_user_id(self.username)
+            if not self.user_id:
+                await thread.send("Could not find that Roblox username. Please try again.")
+                return
+            main_rank = get_group_rank(self.user_id, MAIN_GROUP_ID)
+            other_ranks = get_all_group_ranks(self.user_id, OTHER_KINGDOM_IDS.keys())
+            ranks_text = (
+                f"Your ranks:\n"
+                f"1: Main Group - {main_rank}\n"
+                f"2: Artic's Kingdom - {other_ranks[11592051]}\n"
+                f"3: Kavra's Kingdom - {other_ranks[4561896]}\n"
+                f"4: Vinay's Kingdom - {other_ranks[16132358]}\n"
+                "Which group would you like to transfer from? (Reply with 1, 2, 3, or 4)"
+            )
+            await thread.send(ranks_text)
+
+            msg = await bot.wait_for("message", check=check, timeout=300)
+            choice = msg.content.strip()
+            group_map = {
+                "1": MAIN_GROUP_ID,
+                "2": 11592051,
+                "3": 4561896,
+                "4": 16132358
+            }
+            self.group_choice = group_map.get(choice)
+            if not self.group_choice:
+                await thread.send("Invalid choice. Please reply with 1, 2, 3, or 4.")
+                return
+
+            payload = {
+                "workspace_id": RANKGUN_WORKSPACE_ID,
+                "user_id": self.user_id
+            }
+            headers = {
+                "api-token": RANKGUN_API_KEY,
+                "Content-Type": "application/json"
+            }
+            response = requests.post(RANKGUN_URL, json=payload, headers=headers)
+            if response.status_code == 200:
+                result = response.json()
+                if result.get("status_code") == 200:
+                    await thread.send("Rank transfer completed!")
+                else:
+                    await thread.send(f"Failed to transfer rank: {result.get('detail', 'Unknown error')}")
+            else:
+                await thread.send(f"Failed to transfer rank: HTTP {response.status_code}")
+        except discord.errors.HTTPException as e:
+            await thread.send(f"Error processing request: {e}")
+        except asyncio.TimeoutError:
+            await thread.send("Timed out waiting for your response. Please start a new ticket with `-ranktransfer`.")
+
+@bot.command()
+async def ranktransfer(ctx):
+    view = TicketView()
+    await ctx.send("Make a ticket for a rank transfer!", view=view)
 
 @tasks.loop(minutes=30)
 async def clean_verifications():
