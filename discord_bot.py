@@ -4,6 +4,7 @@ from discord.ext import commands, tasks
 import requests
 import datetime
 import uuid
+import asyncio
 import logging
 
 logging.basicConfig(level=logging.INFO)
