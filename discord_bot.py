@@ -43,7 +43,7 @@ def get_headshot(user_id):
         if "data" in data and len(data["data"]) > 0:
             return data["data"][0].get("imageUrl", f"https://www.roblox.com/headshot-thumbnail/image?userId={user_id}&width=420&height=420&format=png")
         else:
-            return f"https://www.roblox.com/headshot-thumbnail/image?userId={user_id}&width=420&height=420&format=png")
+            return f"https://www.roblox.com/headshot-thumbnail/image?userId={user_id}&width=420&height=420&format=png"
     except Exception:
         return f"https://www.roblox.com/headshot-thumbnail/image?userId={user_id}&width=420&height=420&format=png"
 
@@ -223,7 +223,7 @@ async def data(ctx, platform: str, username: str):
     embed.add_field(name="Presence", value=presence_status, inline=True)
     embed.add_field(name="Game Join Date", value=game_join_date, inline=True)
     embed.add_field(name="Friends", value=friends_count, inline=True)
-    embed.add_field(name="Main Group Rank", value=main_rank, inline=True)
+    embed.add_field(name="Main Group Rank", value=main_group_rank, inline=True)
     embed.add_field(name="Offense Data", value=offense_text, inline=False)
     embed.add_field(name="Other Kingdom Ranks", value=kingdoms_text, inline=False)
     embed.add_field(name="Profile", value=f"[View Roblox Profile](https://www.roblox.com/users/{user_id}/profile)", inline=False)
@@ -439,11 +439,11 @@ class TicketView(discord.ui.View):
         del pending_verifications[self.username.lower()]
         await thread.send("Verification successful! Proceeding with rank transfer.")
 
-        main_rank = get_group_rank(self.user_id, MAIN_GROUP_ID)
+        main_group_rank = get_group_rank(self.user_id, MAIN_GROUP_ID)
         other_ranks = get_all_group_ranks(self.user_id, OTHER_KINGDOM_IDS.keys())
         ranks_text = (
             f"Your ranks:\n"
-            f"1: Main Group - {main_rank}\n"
+            f"1: Main Group - {main_group_rank}\n"
             f"2: Artic's Kingdom - {other_ranks[11592051]}\n"
             f"3: Kavra's Kingdom - {other_ranks[4561896]}\n"
             f"4: Vinay's Kingdom - {other_ranks[16132358]}\n"
@@ -492,10 +492,6 @@ class TicketView(discord.ui.View):
                 await thread.send(f"Failed to transfer rank: {result.get('detail', 'Unknown error')}")
         else:
             await thread.send(f"Failed to transfer rank: HTTP {response.status_code}")
-        except discord.errors.HTTPException as e:
-            await thread.send(f"Error processing request: {e}")
-        except asyncio.TimeoutError:
-            await thread.send("Timed out during processing. Please start a new ticket with `-ranktransfer`.")
 
     @discord.ui.button(label="Close Ticket", style=discord.ButtonStyle.red, custom_id="close_ticket")
     async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
