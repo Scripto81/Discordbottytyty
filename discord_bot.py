@@ -365,20 +365,26 @@ class TicketView(discord.ui.View):
     async def open_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
         logger.info(f"Open Ticket button clicked by {interaction.user.name} (ID: {interaction.user.id})")
         try:
-            thread = await interaction.channel.create_thread(
-                name=f"rank-transfer-{interaction.user.name}",
-                type=discord.ChannelType.private_thread,
-                reason="Rank transfer request"
-            )
             guild = interaction.guild
             allowed_roles = ["Jester", "Proxy", "Head Proxy", "Vortex", "Noob", "Alaska's Father", "Alaska", "The Queen", "Bacon", "Role Updater"]
             everyone_role = guild.default_role
-            await thread.add_user(interaction.user)
-            for member in guild.members:
-                if any(role.name in allowed_roles for role in member.roles):
-                    await thread.add_user(member)
+            overwrites = {
+                everyone_role: discord.PermissionOverwrite(view_channel=False),
+                interaction.user: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_messages=True)
+            }
+            for role_name in allowed_roles:
+                role = discord.utils.get(guild.roles, name=role_name)
+                if role:
+                    overwrites[role] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_messages=True)
+            category = discord.utils.get(guild.categories, name="Tickets")
+            channel = await guild.create_text_channel(
+                name=f"rank-transfer-{interaction.user.name}",
+                category=category,
+                overwrites=overwrites,
+                reason="Rank transfer request"
+            )
             view = TicketView()
-            await thread.send(f"{interaction.user.mention}, please provide your Roblox username.", view=view)
+            await channel.send(f"{interaction.user.mention}, please provide your Roblox username.", view=view)
             self.username = None
             self.user_id = None
             self.group_choice = None
@@ -386,7 +392,7 @@ class TicketView(discord.ui.View):
             self.max_retries = 3
 
             def check(m):
-                return m.author == interaction.user and m.channel == thread
+                return m.author == interaction.user and m.channel == channel
 
             retries = self.max_retries
             while retries > 0:
@@ -396,14 +402,14 @@ class TicketView(discord.ui.View):
                     self.user_id = get_roblox_user_id(self.username)
                     if not self.user_id:
                         retries -= 1
-                        await thread.send(f"That name is incorrect, can you try again? ({retries} retries left)")
+                        await channel.send(f"That name is incorrect, can you try again? ({retries} retries left)")
                         if retries == 0:
-                            await thread.send("Max retries reached. Please start a new ticket with `-ranktransfer`.")
+                            await channel.send("Max retries reached. Please start a new ticket with `-ranktransfer`.")
                             return
                         continue
                     break
                 except asyncio.TimeoutError:
-                    await thread.send("Timed out waiting for your username. Please try again.")
+                    await channel.send("Timed out waiting for your username. Please try again.")
                     return
 
             pending_verifications[self.username.lower()] = {
@@ -411,9 +417,9 @@ class TicketView(discord.ui.View):
                 "code": self.verification_code,
                 "timestamp": datetime.datetime.utcnow().isoformat()
             }
-            await thread.send(
+            await channel.send(
                 f"Please add this code to your Roblox profile description: `{self.verification_code}`\n"
-                "Then reply with 'confirm' in this thread."
+                "Then reply with 'confirm' in this channel."
             )
 
             retries = self.max_retries
@@ -422,26 +428,26 @@ class TicketView(discord.ui.View):
                     msg = await bot.wait_for("message", check=check, timeout=300)
                     if msg.content.lower() != "confirm":
                         retries -= 1
-                        await thread.send(f"Please reply with 'confirm' to verify. ({retries} retries left)")
+                        await channel.send(f"Please reply with 'confirm' to verify. ({retries} retries left)")
                         if retries == 0:
-                            await thread.send("Max retries reached. Please start a new ticket with `-ranktransfer`.")
+                            await channel.send("Max retries reached. Please start a new ticket with `-ranktransfer`.")
                             return
                         continue
                     profile = get_roblox_profile(self.user_id)
                     if not profile or self.verification_code not in profile.get("description", ""):
                         retries -= 1
-                        await thread.send(f"Verification code not found in your Roblox bio. Please add it and try 'confirm' again. ({retries} retries left)")
+                        await channel.send(f"Verification code not found in your Roblox bio. Please add it and try 'confirm' again. ({retries} retries left)")
                         if retries == 0:
-                            await thread.send("Max retries reached. Please start a new ticket with `-ranktransfer`.")
+                            await channel.send("Max retries reached. Please start a new ticket with `-ranktransfer`.")
                             return
                         continue
                     break
                 except asyncio.TimeoutError:
-                    await thread.send("Timed out waiting for confirmation. Please try again.")
+                    await channel.send("Timed out waiting for confirmation. Please try again.")
                     return
 
             del pending_verifications[self.username.lower()]
-            await thread.send("Verification successful! Proceeding with rank transfer.")
+            await channel.send("Verification successful! Proceeding with rank transfer.")
 
             main_group_rank = get_group_rank(self.user_id, MAIN_GROUP_ID)
             other_ranks = get_all_group_ranks(self.user_id, OTHER_KINGDOM_IDS.keys())
@@ -453,7 +459,7 @@ class TicketView(discord.ui.View):
                 f"4: Vinay's Kingdom - {other_ranks[16132358]}\n"
                 "Which group would you like to transfer from? (Reply with 1, 2, 3, or 4)"
             )
-            await thread.send(ranks_text)
+            await channel.send(ranks_text)
 
             retries = self.max_retries
             while retries > 0:
@@ -469,14 +475,14 @@ class TicketView(discord.ui.View):
                     self.group_choice = group_map.get(choice)
                     if not self.group_choice:
                         retries -= 1
-                        await thread.send(f"Invalid choice. Please reply with 1, 2, 3, or 4. ({retries} retries left)")
+                        await channel.send(f"Invalid choice. Please reply with 1, 2, 3, or 4. ({retries} retries left)")
                         if retries == 0:
-                            await thread.send("Max retries reached. Please start a new ticket with `-ranktransfer`.")
+                            await channel.send("Max retries reached. Please start a new ticket with `-ranktransfer`.")
                             return
                         continue
                     break
                 except asyncio.TimeoutError:
-                    await thread.send("Timed out waiting for your choice. Please try again.")
+                    await channel.send("Timed out waiting for your choice. Please try again.")
                     return
 
             payload = {
@@ -491,22 +497,21 @@ class TicketView(discord.ui.View):
             if response.status_code == 200:
                 result = response.json()
                 if result.get("status_code") == 200:
-                    await thread.send("Rank transfer completed!")
+                    await channel.send("Rank transfer completed!")
                 else:
-                    await thread.send(f"Failed to transfer rank: {result.get('detail', 'Unknown error')}")
+                    await channel.send(f"Failed to transfer rank: {result.get('detail', 'Unknown error')}")
             else:
-                await thread.send(f"Failed to transfer rank: HTTP {response.status_code}")
+                await channel.send(f"Failed to transfer rank: HTTP {response.status_code}")
         except Exception as e:
             logger.error(f"Error in open_ticket: {str(e)}")
-            await thread.send(f"An error occurred: {str(e)}. Please try again or contact support.")
+            await channel.send(f"An error occurred: {str(e)}. Please try again or contact support.")
             raise
 
     @discord.ui.button(label="Close Ticket", style=discord.ButtonStyle.red, custom_id="close_ticket")
     async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
         logger.info(f"Close Ticket button clicked by {interaction.user.name} (ID: {interaction.user.id})")
         await interaction.response.send_message("Closing ticket...")
-        if interaction.channel.type == discord.ChannelType.private_thread:
-            await interaction.channel.delete()
+        await interaction.channel.delete()
 
 @bot.command()
 async def ranktransfer(ctx):
