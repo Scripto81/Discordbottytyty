@@ -1,33 +1,28 @@
 import os
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 import requests
 import datetime
-import uuid  # For generating unique verification codes
+import uuid
 
-# Enable members intent
 intents = discord.Intents.default()
 intents.message_content = True
-intents.members = True  # This is required for fetching member profiles
+intents.members = True
 
 bot = commands.Bot(command_prefix='-', intents=intents)
 
-API_BASE_URL = "https://xp-api.onrender.com"  # Your internal API URL
+API_BASE_URL = "https://xp-api.onrender.com"
 
-# Roblox group IDs (unchanged)
-MAIN_GROUP_ID = 7444608  # Example "main" group
+MAIN_GROUP_ID = 7444608
 OTHER_KINGDOM_IDS = {
     11592051: "Artic's Kingdom",
-    4561896:  "Kavra's Kingdom",
+    4561896: "Kavra's Kingdom",
     16132358: "Vinay's Kingdom"
 }
 
-# Placeholder badge ID for determining when a user first joined game 84416791344548.
-# Replace with the actual badge id awarded upon first join.
 GAME_BADGE_ID = 123456789
 
 def format_timestamp(ts):
-    """Convert an ISO timestamp into a human-friendly format."""
     try:
         if ts.endswith("Z"):
             ts = ts[:-1]
@@ -37,10 +32,6 @@ def format_timestamp(ts):
         return ts
 
 def get_headshot(user_id):
-    """
-    Uses Roblox's Thumbnails API to retrieve a headshot.
-    Falls back to the old URL if needed.
-    """
     url = f"https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds={user_id}&size=420x420&format=Png&isCircular=false"
     try:
         response = requests.get(url)
@@ -84,10 +75,6 @@ def get_all_group_ranks(user_id, group_ids):
     return ranks
 
 def get_roblox_profile(user_id):
-    """
-    Fetches Roblox profile data including account creation date,
-    display name, and description.
-    """
     url = f"https://users.roblox.com/v1/users/{user_id}"
     try:
         resp = requests.get(url)
@@ -97,9 +84,6 @@ def get_roblox_profile(user_id):
         return None
 
 def get_last_online(user_id):
-    """
-    Retrieves the last online timestamp for the user.
-    """
     url = "https://presence.roblox.com/v1/presence/last-online"
     payload = {"userIds": [user_id]}
     try:
@@ -113,11 +97,6 @@ def get_last_online(user_id):
         return "N/A"
 
 def get_presence_status(user_id):
-    """
-    Retrieves the current presence status of the user.
-    Returns:
-      - "Online", "In Game", "In Studio", or if offline, the formatted last online time.
-    """
     url = "https://presence.roblox.com/v1/presence/users"
     payload = {"userIds": [user_id]}
     try:
@@ -145,10 +124,6 @@ def get_presence_status(user_id):
         return "Unknown"
 
 def get_game_join_date(user_id, badge_id=GAME_BADGE_ID):
-    """
-    Checks the awarded date for a specific badge (assumed to be awarded upon first join)
-    for the game with id 84416791344548.
-    """
     url = f"https://badges.roblox.com/v1/users/{user_id}/badges/awarded-dates?badgeIds={badge_id}"
     try:
         resp = requests.get(url)
@@ -162,9 +137,6 @@ def get_game_join_date(user_id, badge_id=GAME_BADGE_ID):
         return "Error"
 
 def get_friends_count(user_id):
-    """
-    Retrieves the friend count for the user.
-    """
     url = f"https://friends.roblox.com/v1/users/{user_id}/friends/count"
     try:
         resp = requests.get(url)
@@ -175,9 +147,6 @@ def get_friends_count(user_id):
         return "N/A"
 
 def get_roblox_user_id(username):
-    """
-    Retrieves a Roblox user ID from a given username using the current endpoint.
-    """
     url = "https://users.roblox.com/v1/usernames/users"
     payload = {"usernames": [username], "excludeBannedUsers": False}
     headers = {"Content-Type": "application/json"}
@@ -188,25 +157,14 @@ def get_roblox_user_id(username):
         if data.get("data") and len(data["data"]) > 0:
             return data["data"][0].get("id")
         return None
-    except Exception as e:
-        print("Error in get_roblox_user_id:", e)
+    except Exception:
         return None
 
 @bot.command()
 async def data(ctx, platform: str, username: str):
-    """
-    Usage: -data roblox <username>
-    Fetches the player's data from your API and enriches it with additional details from Roblox:
-      - Account Creation Date
-      - Presence (online/offline/in game)
-      - Game Join Date (via badge award)
-      - Display Name and Friend Count
-      - Offense Data (with strike counts and jail data, if applicable)
-    """
     if platform.lower() != "roblox":
         await ctx.send("Unsupported platform. Please use 'roblox'.")
         return
-
     api_url = f"{API_BASE_URL}/get_user_data?username={username}"
     try:
         response = requests.get(api_url)
@@ -218,16 +176,13 @@ async def data(ctx, platform: str, username: str):
     except requests.exceptions.RequestException as e:
         await ctx.send(f"Error fetching data: {e}")
         return
-
     xp = result.get("xp", "Unknown")
     offense_data = result.get("offenseData", {})
     user_id = result.get("userId")
     last_updated = result.get("last_updated", "Unknown")
-
     if user_id is None:
         await ctx.send("User data does not include a userId.")
         return
-
     profile = get_roblox_profile(user_id)
     display_name = profile.get("displayName") if profile and "displayName" in profile else username
     account_created = format_timestamp(profile.get("created")) if profile and "created" in profile else "N/A"
@@ -235,11 +190,9 @@ async def data(ctx, platform: str, username: str):
     game_join_date_raw = get_game_join_date(user_id)
     game_join_date = format_timestamp(game_join_date_raw) if game_join_date_raw not in ["Not Awarded", "Error", "N/A"] else game_join_date_raw
     friends_count = get_friends_count(user_id)
-
     main_group_rank = get_group_rank(user_id, MAIN_GROUP_ID)
     other_ranks = get_all_group_ranks(user_id, OTHER_KINGDOM_IDS.keys())
     kingdoms_text = "\n".join([f"**{OTHER_KINGDOM_IDS[gid]}:** {other_ranks[gid]}" for gid in OTHER_KINGDOM_IDS])
-
     if offense_data and isinstance(offense_data, dict):
         offense_lines = []
         jail_info = None
@@ -254,9 +207,7 @@ async def data(ctx, platform: str, username: str):
             offense_text += "\n" + jail_info
     else:
         offense_text = "None"
-
     headshot_url = get_headshot(user_id)
-
     embed = discord.Embed(
         title=f"{username}'s Roblox Data",
         color=discord.Color.blue()
@@ -273,7 +224,6 @@ async def data(ctx, platform: str, username: str):
     embed.add_field(name="Offense Data", value=offense_text, inline=False)
     embed.add_field(name="Other Kingdom Ranks", value=kingdoms_text, inline=False)
     embed.add_field(name="Profile", value=f"[View Roblox Profile](https://www.roblox.com/users/{user_id}/profile)", inline=False)
-
     await ctx.send(embed=embed)
 
 @bot.command()
@@ -289,14 +239,9 @@ async def data(ctx, platform: str, username: str):
     "Role Updater"
 )
 async def setxp(ctx, platform: str, username: str, new_xp: int):
-    """
-    Usage: -setxp roblox <username> <new_xp>
-    Updates the player's XP in your API.
-    """
     if platform.lower() != "roblox":
         await ctx.send("Unsupported platform. Please use 'roblox'.")
         return
-
     get_url = f"{API_BASE_URL}/get_user_data?username={username}"
     try:
         get_resp = requests.get(get_url)
@@ -309,7 +254,6 @@ async def setxp(ctx, platform: str, username: str, new_xp: int):
         if user_id is None:
             await ctx.send("User data does not include a userId.")
             return
-
         post_url = f"{API_BASE_URL}/set_xp"
         payload = {"userId": user_id, "xp": new_xp}
         post_resp = requests.post(post_url, json=payload)
@@ -325,22 +269,17 @@ async def setxp(ctx, platform: str, username: str, new_xp: int):
 
 @bot.command()
 async def leaderboard(ctx, platform: str):
-    """
-    Usage: -leaderboard roblox
-    Fetches the top 10 players by XP from the API and displays them.
-    """
     if platform.lower() != "roblox":
         await ctx.send("Unsupported platform. Please use 'roblox'.")
         return
-
     try:
         response = requests.get(f"{API_BASE_URL}/leaderboard")
         response.raise_for_status()
-        top_players = response.json()
+        data = response.json()
+        top_players = data.get('leaderboard', [])
         if not top_players:
             await ctx.send("No leaderboard data available.")
             return
-
         embed = discord.Embed(
             title="Roblox XP Leaderboard",
             description="Top 10 players by XP",
@@ -358,14 +297,9 @@ async def leaderboard(ctx, platform: str):
 
 @bot.command()
 async def register(ctx, platform: str, username: str, roblox_user_id: int, xp: int = 0):
-    """
-    Usage: -register roblox <username> <roblox_user_id> [xp]
-    Registers a new user in the API with optional starting XP.
-    """
     if platform.lower() != "roblox":
         await ctx.send("Unsupported platform. Please use 'roblox'.")
         return
-
     payload = {
         "userId": roblox_user_id,
         "username": username,
@@ -383,17 +317,42 @@ async def register(ctx, platform: str, username: str, roblox_user_id: int, xp: i
     except requests.exceptions.RequestException as e:
         await ctx.send(f"Error registering user: {e}")
 
-# ---------------- Verification Commands ----------------
+@bot.command()
+async def xphistory(ctx, platform: str, username: str):
+    if platform.lower() != "roblox":
+        await ctx.send("Unsupported platform. Please use 'roblox'.")
+        return
+    try:
+        user_id = get_roblox_user_id(username)
+        if not user_id:
+            await ctx.send(f"Could not find Roblox user {username}.")
+            return
+        response = requests.get(f"{API_BASE_URL}/user_stats?userId={user_id}")
+        response.raise_for_status()
+        data = response.json()
+        history = data.get('xp_history', [])
+        if not history:
+            await ctx.send(f"No XP history found for {username}.")
+            return
+        embed = discord.Embed(
+            title=f"{username}'s XP History",
+            color=discord.Color.green()
+        )
+        for entry in history[:10]:
+            embed.add_field(
+                name=format_timestamp(entry['timestamp']),
+                value=f"XP Change: {entry['xp_change']}",
+                inline=False
+            )
+        await ctx.send(embed=embed)
+    except requests.exceptions.RequestException as e:
+        await ctx.send(f"Error fetching XP history: {e}")
 
-pending_verifications = {}  # Key: roblox_username.lower(), Value: { "discord_id": int, "code": str, "timestamp": str }
-verified_accounts = {}      # Key: roblox_username.lower(), Value: { "discord_id": int, "roblox_user_id": int, "timestamp": str }
+pending_verifications = {}
+verified_accounts = {}
 
 @bot.command()
 async def verify(ctx, roblox_username: str):
-    """
-    Usage: -verify <roblox_username>
-    Generates a unique code and instructs the user to add it to their Roblox profile description.
-    """
     key = roblox_username.lower()
     code = str(uuid.uuid4()).split("-")[0]
     pending_verifications[key] = {
@@ -409,35 +368,24 @@ async def verify(ctx, roblox_username: str):
 
 @bot.command()
 async def confirm(ctx, roblox_username: str):
-    """
-    Usage: -confirm <roblox_username>
-    Checks the Roblox profile description for the verification code and, if found,
-    verifies the Roblox account and updates the member's nickname to display as:
-    RobloxDisplayName (@RobloxUsername)
-    """
     key = roblox_username.lower()
     pending = pending_verifications.get(key)
     if not pending:
         await ctx.send("No pending verification found for that username. Please run `-verify <roblox_username>` first.")
         return
-
     if pending["discord_id"] != ctx.author.id:
         await ctx.send("You do not have permission to confirm this verification. It was initiated by another user.")
         return
-
     roblox_user_id = get_roblox_user_id(roblox_username)
     if not roblox_user_id:
         await ctx.send("Could not find that Roblox username.")
         return
-
     profile = get_roblox_profile(roblox_user_id)
     if not profile:
         await ctx.send("Error fetching Roblox profile.")
         return
-
     description = profile.get("description", "")
     verification_code = pending["code"]
-
     if verification_code in description:
         verified_accounts[key] = {
             "discord_id": ctx.author.id,
@@ -445,7 +393,6 @@ async def confirm(ctx, roblox_username: str):
             "timestamp": datetime.datetime.utcnow().isoformat()
         }
         del pending_verifications[key]
-
         if ctx.guild:
             try:
                 roblox_display_name = profile.get("displayName", roblox_username)
@@ -468,16 +415,25 @@ async def confirm(ctx, roblox_username: str):
 
 @bot.command()
 async def verified(ctx, roblox_username: str):
-    """
-    Usage: -verified <roblox_username>
-    Displays the verification status of the given Roblox username.
-    """
     key = roblox_username.lower()
     if key in verified_accounts:
         info = verified_accounts[key]
         await ctx.send(f"Roblox account **{roblox_username}** is verified with Discord ID {info['discord_id']} (verified at {info['timestamp']}).")
     else:
         await ctx.send(f"No verification found for **{roblox_username}**.")
+
+@tasks.loop(minutes=30)
+async def clean_verifications():
+    now = datetime.datetime.utcnow()
+    expired = [k for k, v in pending_verifications.items()
+               if (now - datetime.datetime.fromisoformat(v['timestamp'])).total_seconds() > 3600]
+    for k in expired:
+        del pending_verifications[k]
+
+@bot.event
+async def on_ready():
+    print(f"Logged in as {bot.user}")
+    clean_verifications.start()
 
 @bot.event
 async def on_command_error(ctx, error):
