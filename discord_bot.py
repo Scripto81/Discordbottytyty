@@ -43,7 +43,7 @@ def get_headshot(user_id):
         if "data" in data and len(data["data"]) > 0:
             return data["data"][0].get("imageUrl", f"https://www.roblox.com/headshot-thumbnail/image?userId={user_id}&width=420&height=420&format=png")
         else:
-            return f"https://www.roblox.com/headshot-thumbnail/image?userId={user_id}&width=420&height=420&format=png"
+            return f"https://www.roblox.com/headshot-thumbnail/image?userId={user_id}&width=420&height=420&format=png")
     except Exception:
         return f"https://www.roblox.com/headshot-thumbnail/image?userId={user_id}&width=420&height=420&format=png"
 
@@ -223,7 +223,7 @@ async def data(ctx, platform: str, username: str):
     embed.add_field(name="Presence", value=presence_status, inline=True)
     embed.add_field(name="Game Join Date", value=game_join_date, inline=True)
     embed.add_field(name="Friends", value=friends_count, inline=True)
-    embed.add_field(name="Main Group Rank", value=main_group_rank, inline=True)
+    embed.add_field(name="Main Group Rank", value=main_rank, inline=True)
     embed.add_field(name="Offense Data", value=offense_text, inline=False)
     embed.add_field(name="Other Kingdom Ranks", value=kingdoms_text, inline=False)
     embed.add_field(name="Profile", value=f"[View Roblox Profile](https://www.roblox.com/users/{user_id}/profile)", inline=False)
@@ -364,90 +364,138 @@ class TicketView(discord.ui.View):
             type=discord.ChannelType.private_thread,
             reason="Rank transfer request"
         )
+        guild = interaction.guild
+        allowed_roles = ["Jester", "Proxy", "Head Proxy", "Vortex", "Noob", "Alaska's Father", "Alaska", "The Queen", "Bacon", "Role Updater"]
+        everyone_role = guild.default_role
+        await thread.set_permissions(everyone_role, view_channel=False)
+        for role_name in allowed_roles:
+            role = discord.utils.get(guild.roles, name=role_name)
+            if role:
+                await thread.set_permissions(role, view_channel=True)
         await thread.add_user(interaction.user)
-        await thread.send(f"{interaction.user.mention}, please provide your Roblox username.")
+        view = TicketView()
+        await thread.send(f"{interaction.user.mention}, please provide your Roblox username.", view=view)
         self.username = None
         self.user_id = None
         self.group_choice = None
         self.verification_code = str(uuid.uuid4()).split("-")[0]
+        self.max_retries = 3
 
         def check(m):
             return m.author == interaction.user and m.channel == thread
 
-        try:
-            msg = await bot.wait_for("message", check=check, timeout=300)
-            self.username = msg.content.strip()
-            self.user_id = get_roblox_user_id(self.username)
-            if not self.user_id:
-                await thread.send("Could not find that Roblox username. Please try again.")
-                return
-            pending_verifications[self.username.lower()] = {
-                "discord_id": interaction.user.id,
-                "code": self.verification_code,
-                "timestamp": datetime.datetime.utcnow().isoformat()
-            }
-            await thread.send(
-                f"Please add this code to your Roblox profile description: `{self.verification_code}`\n"
-                "Then reply with 'confirm' in this thread."
-            )
-
-            msg = await bot.wait_for("message", check=check, timeout=300)
-            if msg.content.lower() != "confirm":
-                await thread.send("Please reply with 'confirm' to verify.")
-                return
-            profile = get_roblox_profile(self.user_id)
-            if not profile or self.verification_code not in profile.get("description", ""):
-                await thread.send("Verification code not found in your Roblox bio. Please add it and try 'confirm' again.")
-                return
-            del pending_verifications[self.username.lower()]
-            await thread.send("Verification successful! Proceeding with rank transfer.")
-
-            main_rank = get_group_rank(self.user_id, MAIN_GROUP_ID)
-            other_ranks = get_all_group_ranks(self.user_id, OTHER_KINGDOM_IDS.keys())
-            ranks_text = (
-                f"Your ranks:\n"
-                f"1: Main Group - {main_rank}\n"
-                f"2: Artic's Kingdom - {other_ranks[11592051]}\n"
-                f"3: Kavra's Kingdom - {other_ranks[4561896]}\n"
-                f"4: Vinay's Kingdom - {other_ranks[16132358]}\n"
-                "Which group would you like to transfer from? (Reply with 1, 2, 3, or 4)"
-            )
-            await thread.send(ranks_text)
-
-            msg = await bot.wait_for("message", check=check, timeout=300)
-            choice = msg.content.strip()
-            group_map = {
-                "1": MAIN_GROUP_ID,
-                "2": 11592051,
-                "3": 4561896,
-                "4": 16132358
-            }
-            self.group_choice = group_map.get(choice)
-            if not self.group_choice:
-                await thread.send("Invalid choice. Please reply with 1, 2, 3, or 4.")
+        retries = self.max_retries
+        while retries > 0:
+            try:
+                msg = await bot.wait_for("message", check=check, timeout=300)
+                self.username = msg.content.strip()
+                self.user_id = get_roblox_user_id(self.username)
+                if not self.user_id:
+                    retries -= 1
+                    await thread.send(f"That name is incorrect, can you try again? ({retries} retries left)")
+                    if retries == 0:
+                        await thread.send("Max retries reached. Please start a new ticket with `-ranktransfer`.")
+                        return
+                    continue
+                break
+            except asyncio.TimeoutError:
+                await thread.send("Timed out waiting for your username. Please try again.")
                 return
 
-            payload = {
-                "workspace_id": RANKGUN_WORKSPACE_ID,
-                "user_id": self.user_id
-            }
-            headers = {
-                "api-token": RANKGUN_API_KEY,
-                "Content-Type": "application/json"
-            }
-            response = requests.post(RANKGUN_URL, json=payload, headers=headers)
-            if response.status_code == 200:
-                result = response.json()
-                if result.get("status_code") == 200:
-                    await thread.send("Rank transfer completed!")
-                else:
-                    await thread.send(f"Failed to transfer rank: {result.get('detail', 'Unknown error')}")
+        pending_verifications[self.username.lower()] = {
+            "discord_id": interaction.user.id,
+            "code": self.verification_code,
+            "timestamp": datetime.datetime.utcnow().isoformat()
+        }
+        await thread.send(
+            f"Please add this code to your Roblox profile description: `{self.verification_code}`\n"
+            "Then reply with 'confirm' in this thread."
+        )
+
+        retries = self.max_retries
+        while retries > 0:
+            try:
+                msg = await bot.wait_for("message", check=check, timeout=300)
+                if msg.content.lower() != "confirm":
+                    retries -= 1
+                    await thread.send(f"Please reply with 'confirm' to verify. ({retries} retries left)")
+                    if retries == 0:
+                        await thread.send("Max retries reached. Please start a new ticket with `-ranktransfer`.")
+                        return
+                    continue
+                profile = get_roblox_profile(self.user_id)
+                if not profile or self.verification_code not in profile.get("description", ""):
+                    retries -= 1
+                    await thread.send(f"Verification code not found in your Roblox bio. Please add it and try 'confirm' again. ({retries} retries left)")
+                    if retries == 0:
+                        await thread.send("Max retries reached. Please start a new ticket with `-ranktransfer`.")
+                        return
+                    continue
+                break
+            except asyncio.TimeoutError:
+                await thread.send("Timed out waiting for confirmation. Please try again.")
+                return
+
+        del pending_verifications[self.username.lower()]
+        await thread.send("Verification successful! Proceeding with rank transfer.")
+
+        main_rank = get_group_rank(self.user_id, MAIN_GROUP_ID)
+        other_ranks = get_all_group_ranks(self.user_id, OTHER_KINGDOM_IDS.keys())
+        ranks_text = (
+            f"Your ranks:\n"
+            f"1: Main Group - {main_rank}\n"
+            f"2: Artic's Kingdom - {other_ranks[11592051]}\n"
+            f"3: Kavra's Kingdom - {other_ranks[4561896]}\n"
+            f"4: Vinay's Kingdom - {other_ranks[16132358]}\n"
+            "Which group would you like to transfer from? (Reply with 1, 2, 3, or 4)"
+        )
+        await thread.send(ranks_text)
+
+        retries = self.max_retries
+        while retries > 0:
+            try:
+                msg = await bot.wait_for("message", check=check, timeout=300)
+                choice = msg.content.strip()
+                group_map = {
+                    "1": MAIN_GROUP_ID,
+                    "2": 11592051,
+                    "3": 4561896,
+                    "4": 16132358
+                }
+                self.group_choice = group_map.get(choice)
+                if not self.group_choice:
+                    retries -= 1
+                    await thread.send(f"Invalid choice. Please reply with 1, 2, 3, or 4. ({retries} retries left)")
+                    if retries == 0:
+                        await thread.send("Max retries reached. Please start a new ticket with `-ranktransfer`.")
+                        return
+                    continue
+                break
+            except asyncio.TimeoutError:
+                await thread.send("Timed out waiting for your choice. Please try again.")
+                return
+
+        payload = {
+            "workspace_id": RANKGUN_WORKSPACE_ID,
+            "user_id": self.user_id
+        }
+        headers = {
+            "api-token": RANKGUN_API_KEY,
+            "Content-Type": "application/json"
+        }
+        response = requests.post(RANKGUN_URL, json=payload, headers=headers)
+        if response.status_code == 200:
+            result = response.json()
+            if result.get("status_code") == 200:
+                await thread.send("Rank transfer completed!")
             else:
-                await thread.send(f"Failed to transfer rank: HTTP {response.status_code}")
+                await thread.send(f"Failed to transfer rank: {result.get('detail', 'Unknown error')}")
+        else:
+            await thread.send(f"Failed to transfer rank: HTTP {response.status_code}")
         except discord.errors.HTTPException as e:
             await thread.send(f"Error processing request: {e}")
         except asyncio.TimeoutError:
-            await thread.send("Timed out waiting for your response. Please start a new ticket with `-ranktransfer`.")
+            await thread.send("Timed out during processing. Please start a new ticket with `-ranktransfer`.")
 
     @discord.ui.button(label="Close Ticket", style=discord.ButtonStyle.red, custom_id="close_ticket")
     async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
