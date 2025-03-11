@@ -352,78 +352,6 @@ async def xphistory(ctx, platform: str, username: str):
         await ctx.send(f"Error fetching XP history: {e}")
 
 pending_verifications = {}
-verified_accounts = {}
-
-@bot.command()
-async def verify(ctx, roblox_username: str):
-    key = roblox_username.lower()
-    code = str(uuid.uuid4()).split("-")[0]
-    pending_verifications[key] = {
-        "discord_id": ctx.author.id,
-        "code": code,
-        "timestamp": datetime.datetime.utcnow().isoformat()
-    }
-    await ctx.send(
-        f"{ctx.author.mention}, to verify your Roblox account **{roblox_username}**, please add the following code to your Roblox profile description:\n\n"
-        f"`{code}`\n\n"
-        "After updating your description, run `-confirm " + roblox_username + "` to complete verification."
-    )
-
-@bot.command()
-async def confirm(ctx, roblox_username: str):
-    key = roblox_username.lower()
-    pending = pending_verifications.get(key)
-    if not pending:
-        await ctx.send("No pending verification found for that username. Please run `-verify <roblox_username>` first.")
-        return
-    if pending["discord_id"] != ctx.author.id:
-        await ctx.send("You do not have permission to confirm this verification. It was initiated by another user.")
-        return
-    roblox_user_id = get_roblox_user_id(roblox_username)
-    if not roblox_user_id:
-        await ctx.send("Could not find that Roblox username.")
-        return
-    profile = get_roblox_profile(roblox_user_id)
-    if not profile:
-        await ctx.send("Error fetching Roblox profile.")
-        return
-    description = profile.get("description", "")
-    verification_code = pending["code"]
-    if verification_code in description:
-        verified_accounts[key] = {
-            "discord_id": ctx.author.id,
-            "roblox_user_id": roblox_user_id,
-            "timestamp": datetime.datetime.utcnow().isoformat()
-        }
-        del pending_verifications[key]
-        if ctx.guild:
-            try:
-                roblox_display_name = profile.get("displayName", roblox_username)
-                new_nickname = f"{roblox_display_name} (@{roblox_username})"
-                member = ctx.guild.get_member(ctx.author.id)
-                if member:
-                    await member.edit(nick=new_nickname)
-                    await ctx.send(f"Successfully verified Roblox account **{roblox_username}** and updated your nickname to `{new_nickname}`.")
-                else:
-                    await ctx.send("Verification successful, but I couldn't fetch your Discord member profile to update your nickname.")
-            except Exception as e:
-                await ctx.send("Verification successful, but I was unable to update your nickname. Please check my permissions.")
-        else:
-            await ctx.send(f"Successfully verified Roblox account **{roblox_username}**, but nickname updates are only possible in servers.")
-    else:
-        await ctx.send(
-            "Verification code not found in your Roblox profile description. Please ensure you have updated your description to include:\n"
-            f"`{verification_code}`\nThen try running the command again."
-        )
-
-@bot.command()
-async def verified(ctx, roblox_username: str):
-    key = roblox_username.lower()
-    if key in verified_accounts:
-        info = verified_accounts[key]
-        await ctx.send(f"Roblox account **{roblox_username}** is verified with Discord ID {info['discord_id']} (verified at {info['timestamp']}).")
-    else:
-        await ctx.send(f"No verification found for **{roblox_username}**.")
 
 class TicketView(discord.ui.View):
     def __init__(self):
@@ -441,6 +369,7 @@ class TicketView(discord.ui.View):
         self.username = None
         self.user_id = None
         self.group_choice = None
+        self.verification_code = str(uuid.uuid4()).split("-")[0]
 
         def check(m):
             return m.author == interaction.user and m.channel == thread
@@ -452,6 +381,27 @@ class TicketView(discord.ui.View):
             if not self.user_id:
                 await thread.send("Could not find that Roblox username. Please try again.")
                 return
+            pending_verifications[self.username.lower()] = {
+                "discord_id": interaction.user.id,
+                "code": self.verification_code,
+                "timestamp": datetime.datetime.utcnow().isoformat()
+            }
+            await thread.send(
+                f"Please add this code to your Roblox profile description: `{self.verification_code}`\n"
+                "Then reply with 'confirm' in this thread."
+            )
+
+            msg = await bot.wait_for("message", check=check, timeout=300)
+            if msg.content.lower() != "confirm":
+                await thread.send("Please reply with 'confirm' to verify.")
+                return
+            profile = get_roblox_profile(self.user_id)
+            if not profile or self.verification_code not in profile.get("description", ""):
+                await thread.send("Verification code not found in your Roblox bio. Please add it and try 'confirm' again.")
+                return
+            del pending_verifications[self.username.lower()]
+            await thread.send("Verification successful! Proceeding with rank transfer.")
+
             main_rank = get_group_rank(self.user_id, MAIN_GROUP_ID)
             other_ranks = get_all_group_ranks(self.user_id, OTHER_KINGDOM_IDS.keys())
             ranks_text = (
@@ -498,6 +448,12 @@ class TicketView(discord.ui.View):
             await thread.send(f"Error processing request: {e}")
         except asyncio.TimeoutError:
             await thread.send("Timed out waiting for your response. Please start a new ticket with `-ranktransfer`.")
+
+    @discord.ui.button(label="Close Ticket", style=discord.ButtonStyle.red, custom_id="close_ticket")
+    async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message("Closing ticket...")
+        if interaction.channel.type == discord.ChannelType.private_thread:
+            await interaction.channel.delete()
 
 @bot.command()
 async def ranktransfer(ctx):
