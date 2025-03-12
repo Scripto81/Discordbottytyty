@@ -351,17 +351,38 @@ async def handle_ticket(channel, interaction):
                 if result.get("status") == "success":
                     await channel.send(f"Successfully transferred rank '{source_rank}' to Main Group!")
                 else:
-                    await channel.send(f"Failed to transfer rank: {result.get('error', 'Unknown error')}")
+                    error_details = result.get('details', 'Unknown error')
+                    await channel.send(f"Failed to transfer rank: {result.get('error', 'Unknown error')} - {error_details}")
                 return user_id, source_rank
             retries -= 1
             await channel.send(f"Invalid choice. {retries} retries left.")
             if retries == 0:
                 await channel.send("Max retries reached. Please start a new ticket.")
                 return None, None
-        except (ValueError, asyncio.TimeoutError, requests.RequestException) as e:
+        except ValueError:
             retries -= 1
-            await channel.send(f"Error processing choice: {str(e)}. {retries} retries left.")
-            logger.error(f"Error in handle_ticket choice: {str(e)}")
+            await channel.send(f"Invalid input. Please enter a number. {retries} retries left.")
+            if retries == 0:
+                await channel.send("Max retries reached. Please start a new ticket.")
+            return None, None
+        except asyncio.TimeoutError:
+            retries -= 1
+            await channel.send(f"Timed out waiting for choice. {retries} retries left.")
+            if retries == 0:
+                await channel.send("Max retries reached. Please start a new ticket.")
+            return None, None
+        except requests.RequestException as e:
+            retries -= 1
+            error_msg = str(e)
+            if e.response:
+                try:
+                    error_details = e.response.json().get('details', 'No details provided')
+                    error_msg = f"{e.response.status_code} - {error_details}"
+                except ValueError:
+                    error_details = e.response.text
+                    error_msg = f"{e.response.status_code} - {error_details}"
+            await channel.send(f"API error: Failed to set rank - {error_msg}. {retries} retries left.")
+            logger.error(f"Error setting group rank: {str(e)}")
             if retries == 0:
                 await channel.send("Max retries reached. Please start a new ticket.")
             return None, None
