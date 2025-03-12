@@ -457,4 +457,75 @@ class TicketView(discord.ui.View):
                         data = response.json()
                         if 'error' not in data:
                             self.source_role_id = data.get('roleId', 0)
-                        await channel.send(f"Selected group: {OTHER
+                        await channel.send(f"Selected group: {OTHER_KINGDOM_IDS.get(self.source_group_id, 'Main Group')} with rank {ranks[self.source_group_id]}. Transferring...")
+                        break
+                    else:
+                        retries -= 1
+                        await channel.send(f"Invalid choice. Please reply with 1, 2, 3, or 4. ({retries} retries left)")
+                        if retries == 0:
+                            await channel.send("Max retries reached. Please start a new ticket with `-ranktransfer`.")
+                            return
+                        continue
+                except (asyncio.TimeoutError, ValueError):
+                    retries -= 1
+                    await channel.send(f"Invalid input or timed out. Please try again. ({retries} retries left)")
+                    if retries == 0:
+                        await channel.send("Max retries reached. Please start a new ticket with `-ranktransfer`.")
+                        return
+
+            target_group_ids = [gid for gid in group_ids if gid != self.source_group_id]
+            for target_group_id in target_group_ids:
+                payload = {
+                    "userId": self.user_id,
+                    "groupId": target_group_id,
+                    "roleId": self.source_role_id
+                }
+                response = requests.post(f"{API_BASE_URL}/set_group_rank", json=payload)
+                if response.status_code == 200:
+                    result = response.json()
+                    if result.get('status') == 'success':
+                        await channel.send(f"Successfully transferred rank to {OTHER_KINGDOM_IDS.get(target_group_id, 'Main Group')}!")
+                    else:
+                        await channel.send(f"Failed to transfer rank to {OTHER_KINGDOM_IDS.get(target_group_id, 'Main Group')}: {result.get('error', 'Unknown error')}")
+                else:
+                    await channel.send(f"Failed to transfer rank to {OTHER_KINGDOM_IDS.get(target_group_id, 'Main Group')}: HTTP {response.status_code}")
+        except Exception as e:
+            logger.error(f"Error in open_ticket: {str(e)}")
+            await channel.send(f"An error occurred: {str(e)}. Please try again or contact support.")
+            raise
+
+    @discord.ui.button(label="Close Ticket", style=discord.ButtonStyle.red, custom_id="close_ticket")
+    async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        logger.info(f"Close Ticket button clicked by {interaction.user.name} (ID: {interaction.user.id})")
+        await interaction.response.send_message("Closing ticket...")
+        await interaction.channel.delete()
+
+@bot.command()
+async def ranktransfer(ctx):
+    view = TicketView()
+    await ctx.send("Make a ticket for a rank transfer!", view=view)
+
+@tasks.loop(minutes=30)
+async def clean_verifications():
+    now = datetime.datetime.utcnow()
+    expired = [k for k, v in pending_verifications.items()
+               if (now - datetime.datetime.fromisoformat(v['timestamp'])).total_seconds() > 3600]
+    for k in expired:
+        del pending_verifications[k]
+
+@bot.event
+async def on_ready():
+    print(f"Logged in as {bot.user}")
+    clean_verifications.start()
+
+@bot.event
+async def on_command_error(ctx, error):
+    if isinstance(error, commands.MissingAnyRole):
+        await ctx.send("You do not have permission to use this command.")
+    else:
+        raise error
+
+TOKEN = os.environ.get("DISCORD_BOT_TOKEN")
+if not TOKEN:
+    raise ValueError("No Discord bot token provided!")
+bot.run(TOKEN)
