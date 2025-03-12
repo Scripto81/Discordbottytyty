@@ -39,7 +39,7 @@ def format_timestamp(ts):
 def get_headshot(user_id):
     url = f"https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds={user_id}&size=420x420&format=Png&isCircular=false"
     try:
-        response = requests.get(url)
+        response = requests.get(url, timeout=10)
         response.raise_for_status()
         data = response.json()
         if "data" in data and len(data["data"]) > 0:
@@ -52,7 +52,7 @@ def get_headshot(user_id):
 def get_group_rank(user_id, group_id):
     url = f"{API_BASE_URL}/get_group_rank?userId={user_id}&groupId={group_id}"
     try:
-        response = requests.get(url)
+        response = requests.get(url, timeout=10)
         response.raise_for_status()
         data = response.json()
         if 'error' not in data:
@@ -68,7 +68,7 @@ def get_all_group_ranks(user_id, group_ids):
 def get_roblox_profile(user_id):
     url = f"https://users.roblox.com/v1/users/{user_id}"
     try:
-        resp = requests.get(url)
+        resp = requests.get(url, timeout=10)
         resp.raise_for_status()
         return resp.json()
     except Exception:
@@ -78,7 +78,7 @@ def get_last_online(user_id):
     url = "https://presence.roblox.com/v1/presence/last-online"
     payload = {"userIds": [user_id]}
     try:
-        resp = requests.post(url, json=payload)
+        resp = requests.post(url, json=payload, timeout=10)
         resp.raise_for_status()
         data = resp.json()
         if "data" in data and len(data["data"]) > 0:
@@ -91,7 +91,7 @@ def get_presence_status(user_id):
     url = "https://presence.roblox.com/v1/presence/users"
     payload = {"userIds": [user_id]}
     try:
-        resp = requests.post(url, json=payload)
+        resp = requests.post(url, json=payload, timeout=10)
         resp.raise_for_status()
         data = resp.json()
         if "data" in data and len(data["data"]) > 0:
@@ -117,7 +117,7 @@ def get_presence_status(user_id):
 def get_game_join_date(user_id, badge_id=GAME_BADGE_ID):
     url = f"https://badges.roblox.com/v1/users/{user_id}/badges/awarded-dates?badgeIds={badge_id}"
     try:
-        resp = requests.get(url)
+        resp = requests.get(url, timeout=10)
         resp.raise_for_status()
         data = resp.json()
         if "data" in data and len(data["data"]) > 0:
@@ -130,7 +130,7 @@ def get_game_join_date(user_id, badge_id=GAME_BADGE_ID):
 def get_friends_count(user_id):
     url = f"https://friends.roblox.com/v1/users/{user_id}/friends/count"
     try:
-        resp = requests.get(url)
+        resp = requests.get(url, timeout=10)
         resp.raise_for_status()
         data = resp.json()
         return data.get("count", "N/A")
@@ -142,7 +142,7 @@ def get_roblox_user_id(username):
     payload = {"usernames": [username], "excludeBannedUsers": False}
     headers = {"Content-Type": "application/json"}
     try:
-        resp = requests.post(url, headers=headers, json=payload)
+        resp = requests.post(url, headers=headers, json=payload, timeout=10)
         resp.raise_for_status()
         data = resp.json()
         if data.get("data") and len(data["data"]) > 0:
@@ -158,7 +158,7 @@ async def data(ctx, platform: str, username: str):
         return
     api_url = f"{API_BASE_URL}/get_user_data?username={username}"
     try:
-        response = requests.get(api_url)
+        response = requests.get(api_url, timeout=10)
         response.raise_for_status()
         result = response.json()
         if "error" in result:
@@ -233,9 +233,12 @@ async def setxp(ctx, platform: str, username: str, new_xp: int):
     if platform.lower() != "roblox":
         await ctx.send("Unsupported platform. Please use 'roblox'.")
         return
+    if new_xp < 0:
+        await ctx.send("XP must be a non-negative integer.")
+        return
     get_url = f"{API_BASE_URL}/get_user_data?username={username}"
     try:
-        get_resp = requests.get(get_url)
+        get_resp = requests.get(get_url, timeout=10)
         get_resp.raise_for_status()
         user_data = get_resp.json()
         if "error" in user_data:
@@ -247,7 +250,7 @@ async def setxp(ctx, platform: str, username: str, new_xp: int):
             return
         post_url = f"{API_BASE_URL}/set_xp"
         payload = {"userId": user_id, "xp": new_xp}
-        post_resp = requests.post(post_url, json=payload)
+        post_resp = requests.post(post_url, json=payload, timeout=10)
         post_resp.raise_for_status()
         result = post_resp.json()
         if "error" in result:
@@ -264,7 +267,7 @@ async def leaderboard(ctx, platform: str):
         await ctx.send("Unsupported platform. Please use 'roblox'.")
         return
     try:
-        response = requests.get(f"{API_BASE_URL}/leaderboard")
+        response = requests.get(f"{API_BASE_URL}/leaderboard", timeout=10)
         response.raise_for_status()
         data = response.json()
         top_players = data.get('leaderboard', [])
@@ -291,6 +294,9 @@ async def register(ctx, platform: str, username: str, roblox_user_id: int, xp: i
     if platform.lower() != "roblox":
         await ctx.send("Unsupported platform. Please use 'roblox'.")
         return
+    if xp < 0:
+        await ctx.send("XP must be a non-negative integer.")
+        return
     payload = {
         "userId": roblox_user_id,
         "username": username,
@@ -298,7 +304,7 @@ async def register(ctx, platform: str, username: str, roblox_user_id: int, xp: i
         "offenseData": {}
     }
     try:
-        response = requests.post(f"{API_BASE_URL}/update_xp", json=payload)
+        response = requests.post(f"{API_BASE_URL}/update_xp", json=payload, timeout=10)
         response.raise_for_status()
         result = response.json()
         if result.get("status") == "success":
@@ -318,7 +324,7 @@ async def xphistory(ctx, platform: str, username: str):
         if not user_id:
             await ctx.send(f"Could not find Roblox user {username}.")
             return
-        response = requests.get(f"{API_BASE_URL}/user_stats?userId={user_id}")
+        response = requests.get(f"{API_BASE_URL}/user_stats?userId={user_id}", timeout=10)
         response.raise_for_status()
         data = response.json()
         history = data.get('xp_history', [])
@@ -451,13 +457,38 @@ class TicketView(discord.ui.View):
                     group_list = list(ranks.keys())
                     if 1 <= int(choice) <= len(group_list):
                         self.source_group_id = group_list[int(choice) - 1]
-                        url = f"{API_BASE_URL}/get_group_rank?userId={self.user_id}&groupId={self.source_group_id}"
-                        response = requests.get(url)
-                        response.raise_for_status()
-                        data = response.json()
-                        if 'error' not in data:
-                            self.source_role_id = data.get('roleId', 0)
-                        await channel.send(f"Selected group: {OTHER_KINGDOM_IDS.get(self.source_group_id, 'Main Group')} with rank {ranks[self.source_group_id]}. Transferring...")
+                        source_rank = ranks[self.source_group_id]
+                        if self.source_group_id == MAIN_GROUP_ID:
+                            await channel.send("You cannot transfer from the Main Group. Please select another group.")
+                            continue
+                        await channel.send(f"Selected group: {OTHER_KINGDOM_IDS.get(self.source_group_id, 'Main Group')} with rank {source_rank}. Transferring to Main Group...")
+                        if source_rank == "Not in group":
+                            await channel.send(f"You are not a member of {OTHER_KINGDOM_IDS.get(self.source_group_id, 'Main Group')}. Please join the group and try again.")
+                            return
+                        url = f"{API_BASE_URL}/get_role_id?groupId={MAIN_GROUP_ID}&rankName={source_rank}"
+                        response = requests.get(url, timeout=10)
+                        if response.status_code == 200:
+                            data = response.json()
+                            if 'roleId' in data:
+                                target_role_id = data['roleId']
+                                payload = {
+                                    "userId": self.user_id,
+                                    "groupId": MAIN_GROUP_ID,
+                                    "roleId": target_role_id
+                                }
+                                response = requests.post(f"{API_BASE_URL}/set_group_rank", json=payload, timeout=10)
+                                if response.status_code == 200:
+                                    result = response.json()
+                                    if result.get('status') == 'success':
+                                        await channel.send(f"Successfully transferred rank '{source_rank}' to Main Group!")
+                                    else:
+                                        await channel.send(f"Failed to transfer rank to Main Group: {result.get('error', 'Unknown error')}")
+                                else:
+                                    await channel.send(f"Failed to transfer rank to Main Group: HTTP {response.status_code}")
+                            else:
+                                await channel.send(f"Rank '{source_rank}' not found in Main Group.")
+                        else:
+                            await channel.send(f"Error fetching role ID: HTTP {response.status_code}")
                         break
                     else:
                         retries -= 1
@@ -472,23 +503,6 @@ class TicketView(discord.ui.View):
                     if retries == 0:
                         await channel.send("Max retries reached. Please start a new ticket with `-ranktransfer`.")
                         return
-
-            target_group_ids = [gid for gid in group_ids if gid != self.source_group_id]
-            for target_group_id in target_group_ids:
-                payload = {
-                    "userId": self.user_id,
-                    "groupId": target_group_id,
-                    "roleId": self.source_role_id
-                }
-                response = requests.post(f"{API_BASE_URL}/set_group_rank", json=payload)
-                if response.status_code == 200:
-                    result = response.json()
-                    if result.get('status') == 'success':
-                        await channel.send(f"Successfully transferred rank to {OTHER_KINGDOM_IDS.get(target_group_id, 'Main Group')}!")
-                    else:
-                        await channel.send(f"Failed to transfer rank to {OTHER_KINGDOM_IDS.get(target_group_id, 'Main Group')}: {result.get('error', 'Unknown error')}")
-                else:
-                    await channel.send(f"Failed to transfer rank to {OTHER_KINGDOM_IDS.get(target_group_id, 'Main Group')}: HTTP {response.status_code}")
         except Exception as e:
             logger.error(f"Error in open_ticket: {str(e)}")
             await channel.send(f"An error occurred: {str(e)}. Please try again or contact support.")
