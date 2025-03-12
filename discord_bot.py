@@ -358,12 +358,13 @@ async def handle_ticket(channel, interaction):
             if retries == 0:
                 await channel.send("Max retries reached. Please start a new ticket.")
                 return None, None
-        except (ValueError, asyncio.TimeoutError):
+        except (ValueError, asyncio.TimeoutError, requests.RequestException) as e:
             retries -= 1
-            await channel.send(f"Invalid input or timeout. {retries} retries left.")
+            await channel.send(f"Error processing choice: {str(e)}. {retries} retries left.")
+            logger.error(f"Error in handle_ticket choice: {str(e)}")
             if retries == 0:
                 await channel.send("Max retries reached. Please start a new ticket.")
-                return None, None
+            return None, None
     return None, None
 
 class TicketView(discord.ui.View):
@@ -393,7 +394,10 @@ class TicketView(discord.ui.View):
             await handle_ticket(channel, interaction)
         except Exception as e:
             logger.error(f"Error opening ticket: {str(e)}")
-            await interaction.response.send_message("Failed to create ticket.", ephemeral=True)
+            if not interaction.response.is_done():
+                await interaction.response.send_message("Failed to create ticket.", ephemeral=True)
+            else:
+                await interaction.followup.send("Failed to create ticket after initial response.", ephemeral=True)
 
     @discord.ui.button(label="Close Ticket", style=discord.ButtonStyle.red, custom_id="close_ticket")
     async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -402,7 +406,10 @@ class TicketView(discord.ui.View):
             await interaction.channel.delete()
         except Exception as e:
             logger.error(f"Error closing ticket: {str(e)}")
-            await interaction.response.send_message("Failed to close ticket.", ephemeral=True)
+            if not interaction.response.is_done():
+                await interaction.response.send_message("Failed to close ticket.", ephemeral=True)
+            else:
+                await interaction.followup.send("Failed to close ticket.", ephemeral=True)
 
 @bot.command()
 async def ranktransfer(ctx):
@@ -432,6 +439,8 @@ async def on_ready():
 async def on_command_error(ctx, error):
     if isinstance(error, commands.MissingAnyRole):
         await ctx.send("You don’t have permission to use this command.")
+    elif isinstance(error, commands.CommandNotFound):
+        await ctx.send(f"Command '{error.command_name}' not found.")
     else:
         logger.error(f"Command error: {str(error)}")
         await ctx.send("An error occurred. Please try again.")
