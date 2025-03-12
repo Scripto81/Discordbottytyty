@@ -17,9 +17,6 @@ intents.members = True
 bot = commands.Bot(command_prefix='-', intents=intents)
 
 API_BASE_URL = "https://xp-api.onrender.com"
-RANKGUN_URL = "https://api.rankgun.works/roblox/rank"
-RANKGUN_API_KEY = "aj2xgsLVyNnyDv5zdxdts7OUyZnZWW"
-RANKGUN_WORKSPACE_ID = 11492
 
 MAIN_GROUP_ID = 7444608
 OTHER_KINGDOM_IDS = {
@@ -53,33 +50,19 @@ def get_headshot(user_id):
         return f"https://www.roblox.com/headshot-thumbnail/image?userId={user_id}&width=420&height=420&format=png"
 
 def get_group_rank(user_id, group_id):
-    url = f"https://groups.roblox.com/v1/users/{user_id}/groups/roles"
+    url = f"{API_BASE_URL}/get_group_rank?userId={user_id}&groupId={group_id}"
     try:
-        resp = requests.get(url)
-        resp.raise_for_status()
-        data = resp.json()
-        for group_info in data.get("data", []):
-            if group_info.get("group", {}).get("id") == group_id:
-                return group_info.get("role", {}).get("name", "Unknown Role")
-        return "Not in group"
-    except Exception as e:
-        return f"Unknown (error: {e})"
+        response = requests.get(url)
+        response.raise_for_status()
+        data = response.json()
+        if 'error' not in data:
+            return data.get('rank', 'Not in group')
+        return 'Not in group'
+    except Exception:
+        return 'Not in group'
 
 def get_all_group_ranks(user_id, group_ids):
-    url = f"https://groups.roblox.com/v1/users/{user_id}/groups/roles"
-    ranks = {gid: "Not in group" for gid in group_ids}
-    try:
-        resp = requests.get(url)
-        resp.raise_for_status()
-        data = resp.json()
-        for group_info in data.get("data", []):
-            gid = group_info.get("group", {}).get("id")
-            if gid in ranks:
-                role_name = group_info.get("role", {}).get("name", "Unknown Role")
-                ranks[gid] = role_name
-    except Exception as e:
-        for gid in group_ids:
-            ranks[gid] = f"Unknown (error: {e})"
+    ranks = {gid: get_group_rank(user_id, gid) for gid in group_ids}
     return ranks
 
 def get_roblox_profile(user_id):
@@ -389,6 +372,8 @@ class TicketView(discord.ui.View):
             self.username = None
             self.user_id = None
             self.group_choice = None
+            self.source_group_id = None
+            self.source_role_id = None
             self.verification_code = str(uuid.uuid4()).split("-")[0]
             self.max_retries = 3
 
@@ -450,16 +435,12 @@ class TicketView(discord.ui.View):
             del pending_verifications[self.username.lower()]
             await channel.send("Verification successful! Proceeding with rank transfer.")
 
-            main_group_rank = get_group_rank(self.user_id, MAIN_GROUP_ID)
-            other_ranks = get_all_group_ranks(self.user_id, OTHER_KINGDOM_IDS.keys())
-            ranks_text = (
-                f"Your ranks:\n"
-                f"1: Main Group - {main_group_rank}\n"
-                f"2: Artic's Kingdom - {other_ranks[11592051]}\n"
-                f"3: Kavra's Kingdom - {other_ranks[4561896]}\n"
-                f"4: Vinay's Kingdom - {other_ranks[16132358]}\n"
-                "Which group would you like to transfer from? (Reply with 1, 2, 3, or 4)"
-            )
+            group_ids = [MAIN_GROUP_ID] + list(OTHER_KINGDOM_IDS.keys())
+            ranks = {gid: get_group_rank(self.user_id, gid) for gid in group_ids}
+            ranks_text = "Your ranks:\n"
+            for i, (gid, rank) in enumerate(ranks.items(), 1):
+                ranks_text += f"{i}: {OTHER_KINGDOM_IDS.get(gid, 'Main Group')} - {rank}\n"
+            ranks_text += "Which group would you like to transfer from? (Reply with 1, 2, 3, or 4)"
             await channel.send(ranks_text)
 
             retries = self.max_retries
@@ -467,42 +448,47 @@ class TicketView(discord.ui.View):
                 try:
                     msg = await bot.wait_for("message", check=check, timeout=300)
                     choice = msg.content.strip()
-                    group_map = {
-                        "1": MAIN_GROUP_ID,
-                        "2": 11592051,
-                        "3": 4561896,
-                        "4": 16132358
-                    }
-                    self.group_choice = group_map.get(choice)
-                    if not self.group_choice:
+                    group_list = list(ranks.keys())
+                    if 1 <= int(choice) <= len(group_list):
+                        self.source_group_id = group_list[int(choice) - 1]
+                        url = f"{API_BASE_URL}/get_group_rank?userId={self.user_id}&groupId={self.source_group_id}"
+                        response = requests.get(url)
+                        response.raise_for_status()
+                        data = response.json()
+                        if 'error' not in data:
+                            self.source_role_id = data.get('roleId', 0)
+                        await channel.send(f"Selected group: {OTHER_KINGDOM_IDS.get(self.source_group_id, 'Main Group')} with rank {ranks[self.source_group_id]}. Transferring...")
+                        break
+                    else:
                         retries -= 1
                         await channel.send(f"Invalid choice. Please reply with 1, 2, 3, or 4. ({retries} retries left)")
                         if retries == 0:
                             await channel.send("Max retries reached. Please start a new ticket with `-ranktransfer`.")
                             return
                         continue
-                    break
-                except asyncio.TimeoutError:
-                    await channel.send("Timed out waiting for your choice. Please try again.")
-                    return
+                except (asyncio.TimeoutError, ValueError):
+                    retries -= 1
+                    await channel.send(f"Invalid input or timed out. Please try again. ({retries} retries left)")
+                    if retries == 0:
+                        await channel.send("Max retries reached. Please start a new ticket with `-ranktransfer`.")
+                        return
 
-            payload = {
-                "workspace_id": RANKGUN_WORKSPACE_ID,
-                "user_id": self.user_id
-            }
-            headers = {
-                "api-token": RANKGUN_API_KEY,
-                "Content-Type": "application/json"
-            }
-            response = requests.post(RANKGUN_URL, json=payload, headers=headers)
-            if response.status_code == 200:
-                result = response.json()
-                if result.get("status_code") == 200:
-                    await channel.send("Rank transfer completed!")
+            target_group_ids = [gid for gid in group_ids if gid != self.source_group_id]
+            for target_group_id in target_group_ids:
+                payload = {
+                    "userId": self.user_id,
+                    "groupId": target_group_id,
+                    "roleId": self.source_role_id
+                }
+                response = requests.post(f"{API_BASE_URL}/set_group_rank", json=payload)
+                if response.status_code == 200:
+                    result = response.json()
+                    if result.get('status') == 'success':
+                        await channel.send(f"Successfully transferred rank to {OTHER_KINGDOM_IDS.get(target_group_id, 'Main Group')}!")
+                    else:
+                        await channel.send(f"Failed to transfer rank to {OTHER_KINGDOM_IDS.get(target_group_id, 'Main Group')}: {result.get('error', 'Unknown error')}")
                 else:
-                    await channel.send(f"Failed to transfer rank: {result.get('detail', 'Unknown error')}")
-            else:
-                await channel.send(f"Failed to transfer rank: HTTP {response.status_code}")
+                    await channel.send(f"Failed to transfer rank to {OTHER_KINGDOM_IDS.get(target_group_id, 'Main Group')}: HTTP {response.status_code}")
         except Exception as e:
             logger.error(f"Error in open_ticket: {str(e)}")
             await channel.send(f"An error occurred: {str(e)}. Please try again or contact support.")
