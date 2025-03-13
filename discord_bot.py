@@ -322,25 +322,31 @@ async def handle_ticket(channel, interaction):
                     await channel.send("You’re not in the selected group. Please join and retry.")
                     return None, None
                 await channel.send(f"Transferring rank '{source_rank}' from {OTHER_KINGDOM_IDS.get(source_group_id, 'Unknown')} to Main Group...")
-                url = f"{API_BASE_URL}/get_role_id?groupId={MAIN_GROUP_ID}&rankName={source_rank}"
-                resp = requests.get(url, timeout=10)
-                resp.raise_for_status()
-                data = resp.json()
-                if "roleId" not in data:
-                    await channel.send(f"Rank '{source_rank}' not found in Main Group.")
-                    return None, None
-                target_role_id = data["roleId"]
+                if source_group_id == 11592051 and source_rank == "Receptionist":
+                    target_role_id = 2
+                else:
+                    url = f"{API_BASE_URL}/get_role_id?groupId={MAIN_GROUP_ID}&rankName={source_rank}"
+                    resp = requests.get(url, timeout=10)
+                    resp.raise_for_status()
+                    data = resp.json()
+                    if "roleId" not in data:
+                        await channel.send(f"Rank '{source_rank}' not found in Main Group.")
+                        return None, None
+                    target_role_id = data["roleId"]
                 payload = {"userId": user_id, "groupId": MAIN_GROUP_ID, "roleId": target_role_id}
                 resp = requests.post(f"{API_BASE_URL}/set_group_rank", json=payload, timeout=10)
-                resp.raise_for_status()
                 result = resp.json()
-                if result.get("status") == "success":
+                if resp.status_code == 200 and result.get("status") == "success":
                     await channel.send(f"Successfully transferred rank '{source_rank}' to Main Group!")
                 else:
                     error_msg = result.get('error', 'Unknown error')
                     error_details = result.get('details', 'No details provided')
-                    await channel.send(f"Failed to transfer rank: {error_msg} - {error_details}")
-                return user_id, source_rank
+                    await channel.send(f"Failed to transfer rank: {error_msg} - {error_details}. {retries - 1} retries left.")
+                    logger.error(f"API error: {error_msg}, details={error_details}")
+                retries -= 1
+                if retries == 0:
+                    await channel.send("Max retries reached. Please start a new ticket.")
+                return None, None
             retries -= 1
             await channel.send(f"Invalid choice. {retries} retries left.")
             if retries == 0:
