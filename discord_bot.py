@@ -8,29 +8,17 @@ import asyncio
 import logging
 from dotenv import load_dotenv
 
-# Load environment variables
 load_dotenv()
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    filename='discord_bot.log',
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO, filename='discord_bot.log', format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('discord_bot')
 
-# Set up Discord intents
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 
-# Initialize bot
 bot = commands.Bot(command_prefix='-', intents=intents)
 
-# API base URL from environment
 API_BASE_URL = os.getenv("API_BASE_URL", "https://xp-api.onrender.com")
-
-# Group IDs
 MAIN_GROUP_ID = 7444608
 OTHER_KINGDOM_IDS = {
     11592051: "Artic's Kingdom",
@@ -171,7 +159,6 @@ async def data(ctx, platform: str, username: str):
         xp = result.get("xp", "Unknown")
         offense_data = result.get("offenseData", {})
         last_updated = result.get("last_updated", "Unknown")
-
         profile = get_roblox_profile(user_id)
         display_name = profile.get("displayName", username) if profile else username
         account_created = format_timestamp(profile.get("created")) if profile else "N/A"
@@ -182,7 +169,6 @@ async def data(ctx, platform: str, username: str):
         other_ranks = get_all_group_ranks(user_id, OTHER_KINGDOM_IDS.keys())
         kingdoms_text = "\n".join([f"**{OTHER_KINGDOM_IDS[gid]}:** {rank}" for gid, rank in other_ranks.items()])
         offense_text = "\n".join([f"Rule {k}: {v} strikes" for k, v in offense_data.items()]) if offense_data else "None"
-
         embed = discord.Embed(title=f"{username}'s Roblox Data", color=discord.Color.blue())
         embed.set_thumbnail(url=get_headshot(user_id))
         embed.add_field(name="Display Name", value=display_name, inline=True)
