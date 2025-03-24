@@ -209,7 +209,7 @@ async def setxp(ctx, platform: str, username: str, new_xp: int):
         if "error" in result:
             await ctx.send(f"Error: {result['error']}")
             return
-        await ctx.send(f"Successfully set {username}'s XP to {result.get('newXp', new_xp)}.")
+        await ctx.send(f"Successfully set {username}'s XP to {result.get('newXp', new_xp)}. Changes will reflect in-game within 5 minutes.")
     except requests.RequestException as e:
         logger.error(f"Error setting XP for {username}: {str(e)}")
         await ctx.send("Failed to update XP. Please try again later.")
