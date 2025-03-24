@@ -6,28 +6,19 @@ import datetime
 import uuid
 import asyncio
 import logging
-import psycopg2
-from psycopg2.extras import RealDictCursor
-import jwt
 from dotenv import load_dotenv
 
-# Load environment variables (for local testing; on Render, these are set in the dashboard)
 load_dotenv()
-
-# Set up logging
 logging.basicConfig(level=logging.INFO, filename='discord_bot.log', format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('discord_bot')
 
-# Set up Discord bot with intents
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
+
 bot = commands.Bot(command_prefix='-', intents=intents)
 
-# Configuration from environment variables
-API_BASE_URL = os.getenv("API_BASE_URL")
-JWT_SECRET = os.getenv("JWT_SECRET")
-EVENT_CHANNEL_ID = int(os.getenv("EVENT_CHANNEL_ID"))
+API_BASE_URL = os.getenv("API_BASE_URL", "https://xp-api.onrender.com")
 MAIN_GROUP_ID = 7444608
 OTHER_KINGDOM_IDS = {
     11592051: "Artic's Kingdom",
@@ -36,23 +27,6 @@ OTHER_KINGDOM_IDS = {
 }
 GAME_BADGE_ID = 123456789
 
-# Generate JWT token for API authentication
-def get_jwt_token():
-    return jwt.encode({"sub": "discord_bot"}, JWT_SECRET, algorithm="HS256")
-
-# Database connection function
-def get_db_connection():
-    return psycopg2.connect(
-        dbname=os.getenv("DB_NAME"),
-        user=os.getenv("DB_USER"),
-        password=os.getenv("DB_PASSWORD"),
-        host=os.getenv("DB_HOST"),
-        port=os.getenv("DB_PORT", "5432"),
-        cursor_factory=RealDictCursor,
-        sslmode="require"
-    )
-
-# Helper functions
 def format_timestamp(ts):
     try:
         if isinstance(ts, str) and ts.endswith("Z"):
@@ -165,7 +139,6 @@ def get_roblox_user_id(username):
         logger.error(f"Error fetching user ID for username {username}: {str(e)}")
         return None
 
-# Command: Get user data
 @bot.command()
 async def data(ctx, platform: str, username: str):
     if platform.lower() != "roblox":
@@ -214,7 +187,6 @@ async def data(ctx, platform: str, username: str):
         logger.error(f"Error fetching data for {username}: {str(e)}")
         await ctx.send("Failed to fetch user data. Please try again later.")
 
-# Command: Set XP
 @bot.command()
 @commands.has_any_role("Proxy", "Head Proxy", "Vortex", "Noob", "Alaska's Father", "Alaska", "The Queen", "Bacon", "Role Updater")
 async def setxp(ctx, platform: str, username: str, new_xp: int):
@@ -229,10 +201,9 @@ async def setxp(ctx, platform: str, username: str, new_xp: int):
         if not user_id:
             await ctx.send(f"Could not find Roblox user {username}.")
             return
-        headers = {"Authorization": f"Bearer {get_jwt_token()}"}
         url = f"{API_BASE_URL}/set_xp"
         payload = {"userId": user_id, "xp": new_xp}
-        resp = requests.post(url, json=payload, headers=headers, timeout=10)
+        resp = requests.post(url, json=payload, timeout=10)
         resp.raise_for_status()
         result = resp.json()
         if "error" in result:
@@ -243,7 +214,6 @@ async def setxp(ctx, platform: str, username: str, new_xp: int):
         logger.error(f"Error setting XP for {username}: {str(e)}")
         await ctx.send("Failed to update XP. Please try again later.")
 
-# Command: Leaderboard
 @bot.command()
 async def leaderboard(ctx, platform: str):
     if platform.lower() != "roblox":
@@ -265,7 +235,6 @@ async def leaderboard(ctx, platform: str):
         logger.error(f"Error fetching leaderboard: {str(e)}")
         await ctx.send("Failed to fetch leaderboard. Please try again later.")
 
-# Rank transfer handling
 pending_verifications = {}
 
 async def handle_ticket(channel, interaction):
@@ -413,7 +382,6 @@ async def handle_ticket(channel, interaction):
             return None, None
     return None, None
 
-# Ticket view for rank transfer
 class TicketView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -458,7 +426,6 @@ class TicketView(discord.ui.View):
             else:
                 await interaction.followup.send("Failed to close ticket.", ephemeral=True)
 
-# Command: Rank transfer
 @bot.command()
 async def ranktransfer(ctx):
     try:
@@ -468,91 +435,6 @@ async def ranktransfer(ctx):
         logger.error(f"Error in ranktransfer command: {str(e)}")
         await ctx.send("Failed to initiate rank transfer.")
 
-# Random XP event task
-@tasks.loop(hours=1)
-async def random_xp_event():
-    channel = bot.get_channel(EVENT_CHANNEL_ID)
-    if not channel:
-        logger.error("Event channel not found")
-        return
-    word = random.choice(["apple", "banana", "cherry", "date"])
-    xp_reward = random.randint(100, 3000)
-    await channel.send(f"First to type ||{word}|| gets {xp_reward} XP!")
-    def check(m):
-        return m.channel == channel and m.content.lower() == word.lower()
-    try:
-        msg = await bot.wait_for("message", check=check, timeout=300)
-        winner = msg.author
-        await channel.send(f"{winner.mention} won {xp_reward} XP!")
-        await handle_winner_dm(winner, xp_reward)
-    except asyncio.TimeoutError:
-        await channel.send("No one typed the word in time.")
-
-# Handle winner DM for XP redemption or storage
-async def handle_winner_dm(winner, xp_reward):
-    try:
-        await winner.send(f"Congrats! You won {xp_reward} XP. Say 'Redeem' to add it now, or 'Store' to save it for later.")
-        def check(m):
-            return m.author == winner and m.channel == winner.dm_channel and m.content.lower() in ["redeem", "store"]
-        msg = await bot.wait_for("message", check=check, timeout=300)
-        headers = {"Authorization": f"Bearer {get_jwt_token()}"}
-        conn = get_db_connection()
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT roblox_user_id FROM user_mappings WHERE discord_id = %s", (str(winner.id),))
-                mapping = cur.fetchone()
-        if not mapping:
-            await winner.send("You need to verify your Roblox account first with `-verify`.")
-            return
-        roblox_user_id = mapping["roblox_user_id"]
-        if msg.content.lower() == "redeem":
-            payload = {"discord_id": str(winner.id), "userId": roblox_user_id}
-            resp = requests.post(f"{API_BASE_URL}/redeem_xp", json=payload, headers=headers)
-            if resp.status_code == 200:
-                await winner.send(f"Redeemed {xp_reward} XP in-game!")
-            else:
-                payload = {"discord_id": str(winner.id), "xp": xp_reward}
-                requests.post(f"{API_BASE_URL}/store_xp", json=payload, headers=headers)
-                await winner.send(f"Failed to redeem XP now. It’s been stored for later.")
-        elif msg.content.lower() == "store":
-            payload = {"discord_id": str(winner.id), "xp": xp_reward}
-            resp = requests.post(f"{API_BASE_URL}/store_xp", json=payload, headers=headers)
-            if resp.status_code == 200:
-                await winner.send(f"Stored {xp_reward} XP. Say 'Redeem' in this DM anytime to use it.")
-            else:
-                await winner.send("Failed to store XP. Try again later.")
-    except asyncio.TimeoutError:
-        await winner.send(f"You didn’t respond. Your {xp_reward} XP was stored automatically.")
-        headers = {"Authorization": f"Bearer {get_jwt_token()}"}
-        payload = {"discord_id": str(winner.id), "xp": xp_reward}
-        requests.post(f"{API_BASE_URL}/store_xp", json=payload, headers=headers)
-
-# Handle DM redeem command
-@bot.event
-async def on_message(message):
-    if message.author == bot.user:
-        return
-    if isinstance(message.channel, discord.DMChannel) and message.content.lower() == "redeem":
-        headers = {"Authorization": f"Bearer {get_jwt_token()}"}
-        conn = get_db_connection()
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT roblox_user_id FROM user_mappings WHERE discord_id = %s", (str(message.author.id),))
-                mapping = cur.fetchone()
-        if not mapping:
-            await message.author.send("You need to verify your Roblox account first with `-verify`.")
-            return
-        roblox_user_id = mapping["roblox_user_id"]
-        payload = {"discord_id": str(message.author.id), "userId": roblox_user_id}
-        resp = requests.post(f"{API_BASE_URL}/redeem_xp", json=payload, headers=headers)
-        if resp.status_code == 200:
-            data = resp.json()
-            await message.author.send(f"Redeemed {data['redeemed_xp']} XP in-game!")
-        else:
-            await message.author.send("No stored XP or failed to redeem.")
-    await bot.process_commands(message)
-
-# Clean up expired verifications
 @tasks.loop(minutes=30)
 async def clean_verifications():
     try:
@@ -563,14 +445,11 @@ async def clean_verifications():
     except Exception as e:
         logger.error(f"Error cleaning verifications: {str(e)}")
 
-# Bot startup event
 @bot.event
 async def on_ready():
     logger.info(f"Bot logged in as {bot.user}")
     clean_verifications.start()
-    random_xp_event.start()
 
-# Error handling for commands
 @bot.event
 async def on_command_error(ctx, error):
     if isinstance(error, commands.MissingAnyRole):
@@ -582,7 +461,6 @@ async def on_command_error(ctx, error):
         await ctx.send("An error occurred. Please try again.")
         raise error
 
-# Run the bot
 if __name__ == "__main__":
     TOKEN = os.getenv("DISCORD_BOT_TOKEN")
     if not TOKEN:
